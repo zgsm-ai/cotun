@@ -12,11 +12,11 @@ opt_debug = False
 opt_install = False
 opt_software = "1.0.250803"
 opt_protocol = "1.0.250803"
-opt_app = "chisel"
+opt_app = "cotun"
 opt_os = None
 opt_arch = None
 opt_output = None
-opt_module = "github.com/zgsm-ai/{0}".format(opt_app)
+opt_cgo_enabled=0
 
 def run_cmd(cmd):
     p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -32,9 +32,9 @@ def get_go_env_vars():
     # Set environment variables based on current platform
     current_system = platform.system().lower()
     if current_system == "windows":
-        return "set GOOS={0}&&set GOARCH={1}&&".format(go_os, go_arch)
+        return "set GOOS={0}&&set GOARCH={1}&&set CGO_ENABLED={2}&&".format(go_os, go_arch, opt_cgo_enabled)
     else:
-        return "GOOS={0} GOARCH={1}".format(go_os, go_arch)
+        return "GOOS={0} GOARCH={1} CGO_ENABLED={2}".format(go_os, go_arch, opt_cgo_enabled)
 
 # Get last tag.
 def last_tag():
@@ -47,19 +47,20 @@ def last_commit_id():
 # Assemble build command.
 def build_cmd():
     build_flags = []
+    module_id = "github.com/zgsm-ai/{0}".format(opt_app)
 
-    build_flags.append("-X '{0}/cmd.SoftwareVer={1}'".format(opt_module, opt_software))
-    build_flags.append("-X '{0}/cmd.ProtocolVer={1}'".format(opt_module, opt_protocol))
+    build_flags.append("-X '{0}/cmd.SoftwareVer={1}'".format(module_id, opt_software))
+    build_flags.append("-X '{0}/cmd.ProtocolVer={1}'".format(module_id, opt_protocol))
     last_git_tag = last_tag()
     if last_git_tag != "":
-        build_flags.append("-X '{0}/cmd.BuildTag={1}'".format(opt_module, last_git_tag))
+        build_flags.append("-X '{0}/cmd.BuildTag={1}'".format(module_id, last_git_tag))
 
     commit_id = last_commit_id()
     if commit_id != "":
-        build_flags.append("-X '{0}/cmd.BuildCommitId={1}'".format(opt_module, commit_id))
+        build_flags.append("-X '{0}/cmd.BuildCommitId={1}'".format(module_id, commit_id))
 
     # current time
-    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(opt_module, 
+    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(module_id, 
         time.strftime("%Y-%m-%d %H:%M:%S")))
 
     debug_flag = ""
@@ -85,6 +86,7 @@ def parse_opts():
     global opt_os
     global opt_arch
     global opt_output
+    global opt_cgo_enabled
     argc = len(sys.argv)
     if argc == 1:
         return True
@@ -92,7 +94,7 @@ def parse_opts():
     while i < argc:
         arg = sys.argv[i]
         if arg == '-h':
-            print("build.py [--debug] [--install] [--software VER] [--protocol VER] [--app APPNAME] [--os OS] [--arch ARCH] [--output OUTPUT]")
+            print("build.py [--debug] [--install] [--software VER] [--protocol VER] [--app APPNAME] [--os OS] [--arch ARCH] [--output OUTPUT] [--cgo_enabled 0/1]")
             print("  -d,--debug        编译调试版本")
             print("  -i,--install      把程序拷贝到安装目录")
             print("  -s,--software VER 指定软件版本,VER格式:x.x.x,如: 1.1.1210")
@@ -101,6 +103,7 @@ def parse_opts():
             print("  --os OS           指定目标操作系统,如: windows, linux, darwin")
             print("  --arch ARCH       指定目标架构,如: amd64, arm64, 386")
             print("  --output OUTPUT   指定输出文件路径")
+            print("  --cgo_enabled     启用CGO,取值0或1,默认为0")
             return False
         elif arg == '-d' or arg == '--debug':
             opt_debug = True
@@ -136,6 +139,14 @@ def parse_opts():
             if i == argc:
                 raise Exception("--output missing parameter")
             opt_output = sys.argv[i]
+        elif arg == '--cgo_enabled':
+            i += 1
+            if i == argc:
+                raise Exception("--cgo_enabled missing parameter")
+            value = sys.argv[i]
+            if value not in ['0', '1']:
+                raise Exception("--cgo_enabled value must be 0 or 1")
+            opt_cgo_enabled = int(value)
         i += 1
     return True
 

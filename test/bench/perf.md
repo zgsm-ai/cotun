@@ -1,14 +1,14 @@
 
 ### Performance
 
-With [crowbar](https://github.com/q3k/crowbar), a connection is tunneled by repeatedly querying the server with updates. This results in a large amount of HTTP and TCP connection overhead. Chisel overcomes this using WebSockets combined with [crypto/ssh](https://golang.org/x/crypto/ssh) to create hundreds of logical connections, resulting in **one** TCP connection per client.
+With [crowbar](https://github.com/q3k/crowbar), a connection is tunneled by repeatedly querying the server with updates. This results in a large amount of HTTP and TCP connection overhead. Cotun overcomes this using WebSockets combined with [crypto/ssh](https://golang.org/x/crypto/ssh) to create hundreds of logical connections, resulting in **one** TCP connection per client.
 
 In this simple benchmark, we have:
 
 ```
 					(direct)
         .--------------->----------------.
-       /    chisel         chisel         \
+       /    cotun          cotun          \
 request--->client:2001--->server:2002---->fileserver:3000
        \                                  /
         '--> crowbar:4001--->crowbar:4002'
@@ -31,7 +31,7 @@ _direct_
 :3000 => 100000000 bytes in 76.3939ms
 ```
 
-`chisel`
+`cotun`
 
 ```
 :2001 => 1 bytes in 1.351976ms

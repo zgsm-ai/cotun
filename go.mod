@@ -1,4 +1,4 @@
-module github.com/jpillora/chisel
+module github.com/zgsm-ai/cotun
 
 go 1.21
 

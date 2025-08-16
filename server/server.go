@@ -12,16 +12,16 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	chshare "github.com/jpillora/chisel/share"
-	"github.com/jpillora/chisel/share/ccrypto"
-	"github.com/jpillora/chisel/share/cio"
-	"github.com/jpillora/chisel/share/cnet"
-	"github.com/jpillora/chisel/share/settings"
 	"github.com/jpillora/requestlog"
+	chshare "github.com/zgsm-ai/cotun/share"
+	"github.com/zgsm-ai/cotun/share/ccrypto"
+	"github.com/zgsm-ai/cotun/share/cio"
+	"github.com/zgsm-ai/cotun/share/cnet"
+	"github.com/zgsm-ai/cotun/share/settings"
 	"golang.org/x/crypto/ssh"
 )
 
-// Config is the configuration for the chisel service
+// Config is the configuration for the cotun service
 type Config struct {
 	KeySeed   string
 	KeyFile   string
@@ -34,7 +34,7 @@ type Config struct {
 	TLS       TLSConfig
 }
 
-// Server respresent a chisel service
+// Server respresent a cotun service
 type Server struct {
 	*cio.Logger
 	config       *Config
@@ -53,7 +53,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: settings.EnvInt("WS_BUFF_SIZE", 0),
 }
 
-// NewServer creates and returns a new chisel server
+// NewServer creates and returns a new cotun server
 func NewServer(c *Config) (*Server, error) {
 	server := &Server{
 		config:     c,
@@ -81,7 +81,7 @@ func NewServer(c *Config) (*Server, error) {
 	if c.KeyFile != "" {
 		var key []byte
 
-		if ccrypto.IsChiselKey([]byte(c.KeyFile)) {
+		if ccrypto.IsCotunKey([]byte(c.KeyFile)) {
 			key = []byte(c.KeyFile)
 		} else {
 			key, err = os.ReadFile(c.KeyFile)
@@ -91,8 +91,8 @@ func NewServer(c *Config) (*Server, error) {
 		}
 
 		pemBytes = key
-		if ccrypto.IsChiselKey(key) {
-			pemBytes, err = ccrypto.ChiselKey2PEM(key)
+		if ccrypto.IsCotunKey(key) {
+			pemBytes, err = ccrypto.CotunKey2PEM(key)
 			if err != nil {
 				log.Fatalf("Invalid key %s", string(key))
 			}
@@ -143,7 +143,7 @@ func NewServer(c *Config) (*Server, error) {
 	return server, nil
 }
 
-// Run is responsible for starting the chisel service.
+// Run is responsible for starting the cotun service.
 // Internally this calls Start then Wait.
 func (s *Server) Run(host, port string) error {
 	if err := s.Start(host, port); err != nil {

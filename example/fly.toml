@@ -1,4 +1,4 @@
-app = "jp-chisel"
+app = "jp-cotun"
 kill_signal = "SIGINT"
 kill_timeout = 5
 processes = []

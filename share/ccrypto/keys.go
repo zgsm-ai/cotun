@@ -14,18 +14,18 @@ func GenerateKey(seed string) ([]byte, error) {
 	return Seed2PEM(seed)
 }
 
-// GenerateKeyFile generates an ChiselKey
+// GenerateKeyFile generates an CotunKey
 func GenerateKeyFile(keyFilePath, seed string) error {
-	chiselKey, err := seed2ChiselKey(seed)
+	cotunKey, err := seed2CotunKey(seed)
 	if err != nil {
 		return err
 	}
 
 	if keyFilePath == "-" {
-		fmt.Print(string(chiselKey))
+		fmt.Print(string(cotunKey))
 		return nil
 	}
-	return os.WriteFile(keyFilePath, chiselKey, 0600)
+	return os.WriteFile(keyFilePath, cotunKey, 0600)
 }
 
 // FingerprintKey calculates the SHA256 hash of an SSH public key
