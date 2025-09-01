@@ -10,11 +10,12 @@ import os, time, subprocess, sys, platform
 # --app
 opt_debug = False
 opt_install = False
-opt_software = "1.0.250803"
-opt_protocol = "1.0.250803"
+opt_software = "1.0.0"
+
 opt_app = "cotun"
 opt_os = None
 opt_arch = None
+opt_module = "github.com/zgsm-ai/{0}".format(opt_app)
 opt_output = None
 opt_cgo_enabled=0
 
@@ -47,20 +48,18 @@ def last_commit_id():
 # Assemble build command.
 def build_cmd():
     build_flags = []
-    module_id = "github.com/zgsm-ai/{0}".format(opt_app)
 
-    build_flags.append("-X '{0}/cmd.SoftwareVer={1}'".format(module_id, opt_software))
-    build_flags.append("-X '{0}/cmd.ProtocolVer={1}'".format(module_id, opt_protocol))
+    build_flags.append("-X '{0}/cmd.SoftwareVer={1}'".format(opt_module, opt_software))
     last_git_tag = last_tag()
     if last_git_tag != "":
-        build_flags.append("-X '{0}/cmd.BuildTag={1}'".format(module_id, last_git_tag))
+        build_flags.append("-X '{0}/cmd.BuildTag={1}'".format(opt_module, last_git_tag))
 
     commit_id = last_commit_id()
     if commit_id != "":
-        build_flags.append("-X '{0}/cmd.BuildCommitId={1}'".format(module_id, commit_id))
+        build_flags.append("-X '{0}/cmd.BuildCommitId={1}'".format(opt_module, commit_id))
 
     # current time
-    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(module_id, 
+    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(opt_module, 
         time.strftime("%Y-%m-%d %H:%M:%S")))
 
     debug_flag = ""
@@ -80,7 +79,6 @@ def build_cmd():
 def parse_opts():
     global opt_debug
     global opt_install
-    global opt_protocol
     global opt_software
     global opt_app
     global opt_os
@@ -94,11 +92,10 @@ def parse_opts():
     while i < argc:
         arg = sys.argv[i]
         if arg == '-h':
-            print("build.py [--debug] [--install] [--software VER] [--protocol VER] [--app APPNAME] [--os OS] [--arch ARCH] [--output OUTPUT] [--cgo_enabled 0/1]")
+            print("build.py [--debug] [--install] [--software VER] [--app APPNAME] [--os OS] [--arch ARCH] [--output OUTPUT] [--cgo_enabled 0/1]")
             print("  -d,--debug        编译调试版本")
             print("  -i,--install      把程序拷贝到安装目录")
             print("  -s,--software VER 指定软件版本,VER格式:x.x.x,如: 1.1.1210")
-            print("  -p,--protocol VER RESTful API的版本,VER格式:x.x.x,如: 1.1.1210")
             print("  -a,--app APPNAME  当前构建的程序名字")
             print("  --os OS           指定目标操作系统,如: windows, linux, darwin")
             print("  --arch ARCH       指定目标架构,如: amd64, arm64, 386")
@@ -119,11 +116,6 @@ def parse_opts():
             if i == argc:
                 raise Exception("--software/-s missing parameter")
             opt_software = sys.argv[i]
-        elif arg == '-p' or arg == '--protocol':
-            i += 1
-            if i == argc:
-                raise Exception("--protocol/-p missing parameter")
-            opt_protocol = sys.argv[i]
         elif arg == '--os':
             i += 1
             if i == argc:
