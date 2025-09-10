@@ -212,21 +212,34 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 func (s *Server) handleControlPlaneHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	path := r.URL.Path
 	method := r.Method
 
+	paths := strings.Split(r.URL.Path, "/")
+	if len(paths) < 5 {
+		rError(w, http.StatusNotFound, "API endpoint not found")
+		return
+	}
+	if paths[1] != "tunnel-manager" && paths[1] != "cotun" {
+		rError(w, http.StatusNotFound, "API endpoint not found")
+		return
+	}
+	if paths[2] != "api" || paths[3] != "v1" || paths[4] != "ports" {
+		rError(w, http.StatusNotFound, "API endpoint not found")
+		return
+	}
 	switch {
-	case path == "/api/v1/ports" && method == "GET":
-		s.handleGetPorts(w, r)
-	case path == "/api/v1/ports" && method == "POST":
+	case method == "GET":
+		if len(paths) == 5 {
+			s.handleGetPorts(w, r)
+		} else {
+			s.handleGetPort(w, r)
+		}
+	case method == "POST":
 		s.handleCreatePort(w, r)
-	case strings.HasPrefix(path, "/api/v1/ports/") && method == "GET":
-		s.handleGetPort(w, r)
-	case path == "/api/v1/ports" && method == "DELETE":
+	case method == "DELETE":
 		s.handleDeletePort(w, r)
 	default:
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "API endpoint not found"})
+		rError(w, http.StatusNotFound, "API endpoint not found")
 	}
 }
 
@@ -350,14 +363,15 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 // handleGetPort 获取特定客户端和应用的端口信息
 func (s *Server) handleGetPort(w http.ResponseWriter, r *http.Request) {
 	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 5 {
+	if len(pathParts) < 7 {
 		s.Errorf("Invalid path: %s", r.URL.Path)
 		rError(w, http.StatusBadRequest, "Invalid path")
 		return
 	}
+	// /cotun/api/v1/ports/{clientId}/{appName}
 
-	clientID := pathParts[3]
-	appName := pathParts[4]
+	clientID := pathParts[5]
+	appName := pathParts[6]
 	userId := s.getUserId(r)
 
 	var res PortQueryResponse
