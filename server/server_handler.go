@@ -336,7 +336,8 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.Infof("Port query: clientId=%s,userId=%s,appName=%s, ports=%+v", clientId, userId, appName, ports)
+	s.Infof("Port query: url=%s,clientId=%s,userId=%s,appName=%s, ports=%+v",
+		r.URL.RawPath, clientId, userId, appName, ports)
 	rJSON(w, http.StatusOK, ports)
 }
 
