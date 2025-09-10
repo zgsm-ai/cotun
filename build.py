@@ -10,7 +10,7 @@ import os, time, subprocess, sys, platform
 # --app
 opt_debug = False
 opt_install = False
-opt_software = "1.0.0"
+opt_software = "1.2.0"
 
 opt_app = "cotun"
 opt_os = None
@@ -49,7 +49,7 @@ def last_commit_id():
 def build_cmd():
     build_flags = []
 
-    build_flags.append("-X '{0}/cmd.SoftwareVer={1}'".format(opt_module, opt_software))
+    build_flags.append("-X '{0}/share.BuildVersion={1}'".format(opt_module, opt_software))
     last_git_tag = last_tag()
     if last_git_tag != "":
         build_flags.append("-X '{0}/cmd.BuildTag={1}'".format(opt_module, last_git_tag))

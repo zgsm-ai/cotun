@@ -104,6 +104,10 @@ var serverHelp = `
     --port, -p, Defines the HTTP listening port (defaults to the environment
     variable PORT and fallsback to port 8080).
 
+    --minport, Defines the minimum port for port allocation (defaults to 30000).
+
+    --maxport, Defines the maximum port for port allocation (defaults to 31000).
+
     --key, (deprecated use --keygen and --keyfile instead)
     An optional string to seed the generation of a ECDSA public
     and private key pair. All communications will be secured using this
@@ -171,9 +175,16 @@ var serverHelp = `
     provide a certificate notification email by setting COTUN_LE_EMAIL.
 
     --tls-ca, a path to a PEM encoded CA certificate bundle or a directory
-    holding multiple PEM encode CA certificate bundle files, which is used to 
-    validate client connections. The provided CA certificates will be used 
-    instead of the system roots. This is commonly used to implement mutual-TLS. 
+    holding multiple PEM encode CA certificate bundle files, which is used to
+    validate client connections. The provided CA certificates will be used
+    instead of the system roots. This is commonly used to implement mutual-TLS.
+
+    --control-port, Control plane port, used for managing port information. Supports the following API endpoints:
+      GET /api/v1/ports - Get all port information
+      POST /api/v1/ports - Create new port
+      GET /api/v1/ports/{clientid}/{appname} - Get port information for specific client and application
+      DELETE /api/v1/ports?clientid=xx&appname=xx - Delete port
+      Default port is 7890.
 ` + commonHelp
 
 func server(args []string) {
@@ -194,6 +205,9 @@ func server(args []string) {
 	flags.StringVar(&config.TLS.Cert, "tls-cert", "", "")
 	flags.Var(multiFlag{&config.TLS.Domains}, "tls-domain", "")
 	flags.StringVar(&config.TLS.CA, "tls-ca", "", "")
+	flags.StringVar(&config.ControlPort, "control-port", "7890", "Control plane port, default is 7890")
+	flags.IntVar(&config.MinPort, "minport", 30000, "Minimum port for port allocation, default is 30000")
+	flags.IntVar(&config.MaxPort, "maxport", 31000, "Maximum port for port allocation, default is 31000")
 
 	host := flags.String("host", "", "")
 	p := flags.String("p", "", "")
@@ -353,13 +367,19 @@ var clientHelp = `
     client's internal SOCKS5 proxy.
 
     When stdio is used as local-host, the tunnel will connect standard
-    input/output of this program with the remote. This is useful when 
+    input/output of this program with the remote. This is useful when
     combined with ssh ProxyCommand. You can use
       ssh -o ProxyCommand='cotun client cotunserver stdio:%h:%p' \
           user@example.com
     to connect to an SSH server through the tunnel.
 
   Options:
+
+    --authfile, Path to authentication configuration file. This file should
+    be a JSON object containing authentication-related parameters such as
+    fingerprint, auth, tls-ca, tls-skip-verify, tls-cert, tls-key, header,
+    hostname, sni, client-id, app-name, user-id. Command line options will
+    override values from the authfile.
 
     --fingerprint, A *strongly recommended* fingerprint string
     to perform host-key validation against the server's public key.
@@ -397,7 +417,7 @@ var clientHelp = `
     --hostname, Optionally set the 'Host' header (defaults to the host
     found in the server url).
 
-    --sni, Override the ServerName when using TLS (defaults to the 
+    --sni, Override the ServerName when using TLS (defaults to the
     hostname).
 
     --tls-ca, An optional root certificate bundle used to verify the
@@ -412,13 +432,32 @@ var clientHelp = `
     may be still verified (see --fingerprint) after inner connection
     is established.
 
-    --tls-key, a path to a PEM encoded private key used for client 
+    --tls-key, a path to a PEM encoded private key used for client
     authentication (mutual-TLS).
 
-    --tls-cert, a path to a PEM encoded certificate matching the provided 
-    private key. The certificate must have client authentication 
+    --tls-cert, a path to a PEM encoded certificate matching the provided
+    private key. The certificate must have client authentication
     enabled (mutual-TLS).
+
+    --client-id, Client ID, will be added to HTTP request headers as X-Client-Id.
+
+    --app-name, Application name, will be added to HTTP request headers as X-App-Name.
+
+    --user-id, User ID, will be added to HTTP request headers as X-User-Id.
+
+	--client-port, Client application listen port
+
+	--mapping-port, Cloud mapping port
 ` + commonHelp
+
+func setString(target *string, opt *string) {
+	if *target != "" {
+		return
+	}
+	if opt != nil {
+		*target = *opt
+	}
+}
 
 func client(args []string) {
 	flags := flag.NewFlagSet("client", flag.ContinueOnError)
@@ -438,6 +477,12 @@ func client(args []string) {
 	sni := flags.String("sni", "", "")
 	pid := flags.Bool("pid", false, "")
 	verbose := flags.Bool("v", false, "")
+	clientId := flags.String("client-id", "", "client machine ID")
+	appName := flags.String("app-name", "", "client application name")
+	userId := flags.String("user-id", "", "client user ID")
+	clientPort := flags.Int("client-port", 0, "client port")
+	mappingPort := flags.Int("mapping-port", 0, "mapping port")
+	authFile := flags.String("authfile", "", "path to authentication configuration file")
 	flags.Usage = func() {
 		fmt.Print(clientHelp)
 		os.Exit(0)
@@ -445,11 +490,51 @@ func client(args []string) {
 	flags.Parse(args)
 	//pull out options, put back remaining args
 	args = flags.Args()
-	if len(args) < 2 {
-		log.Fatalf("A server and least one remote is required")
+	if len(args) < 1 {
+		log.Fatalf("A server is required")
 	}
 	config.Server = args[0]
 	config.Remotes = args[1:]
+	config.Remotes = append(config.Remotes, fmt.Sprintf("R:%d:127.0.0.1:%d", *mappingPort, *clientPort))
+
+	// 加载authfile配置
+	if *authFile != "" {
+		authConfig, err := chclient.LoadAuthFile(*authFile)
+		if err != nil {
+			log.Fatalf("Failed to load auth file: %v", err)
+		}
+		if authConfig != nil {
+			// 设置fingerprint（如果命令行未设置）
+			setString(&config.Fingerprint, authConfig.Fingerprint)
+			setString(&config.Auth, authConfig.Auth)
+
+			// 设置TLS配置（如果命令行未设置）
+			tlsConfig := authConfig.TLS
+			if tlsConfig != nil {
+				setString(&config.TLS.CA, tlsConfig.CA)
+				setString(&config.TLS.Cert, tlsConfig.Cert)
+				setString(&config.TLS.Key, tlsConfig.Key)
+				if !config.TLS.SkipVerify && tlsConfig.SkipVerify != nil {
+					config.TLS.SkipVerify = *tlsConfig.SkipVerify
+				}
+			}
+
+			// 设置headers（合并到现有headers）
+			authHeaders := authConfig.Headers
+			if authHeaders != nil {
+				for key, value := range *authHeaders {
+					config.Headers.Set(key, value)
+				}
+			}
+
+			setString(hostname, authConfig.Hostname)
+			setString(sni, authConfig.SNI)
+			setString(clientId, authConfig.ClientID)
+			setString(appName, authConfig.AppName)
+			setString(userId, authConfig.UserID)
+		}
+	}
+
 	//default auth
 	if config.Auth == "" {
 		config.Auth = os.Getenv("AUTH")
@@ -462,6 +547,23 @@ func client(args []string) {
 
 	if *sni != "" {
 		config.TLS.ServerName = *sni
+	}
+
+	// 添加新的HTTP头部信息
+	if *clientId != "" {
+		config.Headers.Set("X-Client-Id", *clientId)
+	}
+	if *appName != "" {
+		config.Headers.Set("X-App-Name", *appName)
+	}
+	if *userId != "" {
+		config.Headers.Set("X-User-Id", *userId)
+	}
+	if *clientPort != 0 {
+		config.Headers.Set("X-Client-Port", fmt.Sprint(*clientPort))
+	}
+	if *mappingPort != 0 {
+		config.Headers.Set("X-Mapping-Port", fmt.Sprint(*mappingPort))
 	}
 
 	//ready

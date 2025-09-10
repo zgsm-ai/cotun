@@ -1,11 +1,15 @@
 package chserver
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	chshare "github.com/zgsm-ai/cotun/share"
 	"github.com/zgsm-ai/cotun/share/cnet"
 	"github.com/zgsm-ai/cotun/share/settings"
@@ -51,6 +55,44 @@ func (s *Server) handleClientHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	id := atomic.AddInt32(&s.sessCount, 1)
 	l := s.Fork("session#%d", id)
+
+	// 从HTTP请求头获取客户端信息
+	clientId := req.Header.Get("X-Client-Id")
+	appName := req.Header.Get("X-App-Name")
+	userId := req.Header.Get("X-User-Id")
+	clientPortStr := req.Header.Get("X-Client-Port")
+	mappingPortStr := req.Header.Get("X-Mapping-Port")
+
+	// 验证客户端信息是否完整
+	if clientId == "" || appName == "" || userId == "" || clientPortStr == "" || mappingPortStr == "" {
+		l.Infof("Missing required client headers: clientId=%s, appName=%s, userId=%s, clientPort=%s,mappingPort=%s",
+			clientId, appName, userId, clientPortStr, mappingPortStr)
+		rError(w, http.StatusForbidden, "Missing required client identification headers")
+		return
+	}
+	clientPort, err := strconv.Atoi(clientPortStr)
+	if err != nil {
+		l.Infof("Invalid fields: clientPort=%s", clientPortStr)
+		rError(w, http.StatusBadRequest, "Invalid fields")
+		return
+	}
+	mappingPort, err := strconv.Atoi(mappingPortStr)
+	if err != nil {
+		l.Infof("Invalid fields: mappingPort=%s", mappingPortStr)
+		rError(w, http.StatusBadRequest, "Invalid fields")
+		return
+	}
+	// 查询allocator验证该客户端是否已分配端口
+	alloc, err := s.allocator.ApplyPort(clientId, userId, appName, clientPort, mappingPort)
+	if err != nil {
+		l.Infof("Client not authorized: clientId=%s, appName=%s, userId=%s, clientPort=%s, mappingPort=%s, error=%v", clientId, appName, userId, clientPortStr, mappingPortStr, err)
+		rError(w, http.StatusForbidden, "Client not authorized - no port allocated")
+		return
+	}
+	alloc.Status = Connected
+
+	l.Infof("Client authorized: clientId=%s, appName=%s, userId=%s, clientPort=%s, mappingPort=%s", clientId, appName, userId, clientPortStr, mappingPortStr)
+
 	wsConn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		l.Debugf("Failed to upgrade (%s)", err)
@@ -163,4 +205,193 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	} else {
 		l.Debugf("Closed connection")
 	}
+	alloc.Status = Allocated
+}
+
+// handleControlPlaneHandler 处理控制面API请求
+func (s *Server) handleControlPlaneHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	path := r.URL.Path
+	method := r.Method
+
+	switch {
+	case path == "/api/v1/ports" && method == "GET":
+		s.handleGetPorts(w, r)
+	case path == "/api/v1/ports" && method == "POST":
+		s.handleCreatePort(w, r)
+	case strings.HasPrefix(path, "/api/v1/ports/") && method == "GET":
+		s.handleGetPort(w, r)
+	case path == "/api/v1/ports" && method == "DELETE":
+		s.handleDeletePort(w, r)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "API endpoint not found"})
+	}
+}
+
+func (s *Server) getUserId(r *http.Request) string {
+	// Get Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return ""
+	}
+
+	// Check if the header has Bearer prefix
+	tokenString := authHeader
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString = authHeader[7:] // Remove "Bearer " prefix
+	}
+
+	// Parse token without verification (for now)
+	token, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return ""
+	}
+
+	// Extract claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		// Extract user_id from claims
+		if userID, exists := claims["id"]; exists {
+			// Set user_id in request header
+			return toString(userID)
+		}
+	}
+	return ""
+}
+
+func rJSON(w http.ResponseWriter, statusCode int, data interface{}) {
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(data)
+}
+
+func rError(w http.ResponseWriter, statusCode int, err string) {
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": err,
+	})
+}
+
+/**
+ * Convert interface value to string
+ * @param {interface{}} v - Value to convert
+ * @returns {string} String representation of the value
+ * @description
+ * - Handles different types: string, float64 (from JSON numbers), etc.
+ * - Returns empty string for unsupported types
+ */
+func toString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return ""
+	}
+}
+
+type PortQueryResponse struct {
+	MappingPort int `json:"mappingPort"`
+}
+
+// handleGetPorts 获取所有端口信息
+func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
+	clientId := r.URL.Query().Get("clientid")
+	appName := r.URL.Query().Get("appname")
+	userId := s.getUserId(r)
+
+	ports := s.allocator.QueryPorts(clientId, userId, appName)
+	if clientId != "" && appName != "" {
+		if len(ports) == 0 {
+			s.Errorf("Port mapping not found: clientId=%s,userId=%s,appName=%s", clientId, userId, appName)
+			rError(w, 404, "Port mapping not found")
+			return
+		}
+		s.Infof("Port query: clientId=%s,userId=%s,appName=%s, port=%d", clientId, userId, appName, ports[0].MappingPort)
+		rJSON(w, 200, PortQueryResponse{
+			MappingPort: ports[0].MappingPort,
+		})
+		return
+	}
+	s.Infof("Port query: clientId=%s,userId=%s,appName=%s, ports=%+v", clientId, userId, appName, ports)
+	rJSON(w, http.StatusOK, ports)
+}
+
+// handleCreatePort 创建新端口
+func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
+	var req PortAllocationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.Errorf("Invalid request body")
+		rError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	req.UserId = s.getUserId(r)
+
+	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
+		s.Errorf("Missing required fields: %+v", req)
+		rError(w, http.StatusBadRequest, "Missing required fields")
+		return
+	}
+	ret, err := s.allocator.AllocatePort(req.ClientId, req.UserId, req.AppName, req.ClientPort)
+	if err != nil {
+		s.Errorf("No available ports: %+v", req)
+		rError(w, http.StatusInsufficientStorage, "No available ports")
+		return
+	}
+	s.Infof("Allocate port: %+v", req)
+	rJSON(w, http.StatusCreated, ret)
+}
+
+// handleGetPort 获取特定客户端和应用的端口信息
+func (s *Server) handleGetPort(w http.ResponseWriter, r *http.Request) {
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		s.Errorf("Invalid path: %s", r.URL.Path)
+		rError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+
+	clientID := pathParts[3]
+	appName := pathParts[4]
+	userId := s.getUserId(r)
+
+	var res PortQueryResponse
+	port, err := s.allocator.LookupPort(clientID, userId, appName)
+	if err != nil {
+		s.Errorf("Port mapping not found: clientId=%s,appName=%s,userId=%s", clientID, appName, userId)
+		rError(w, http.StatusNotFound, "Port mapping not found")
+		return
+	}
+	res.MappingPort = port.MappingPort
+	s.Infof("Port fetch: clientId=%s,appName=%s,userId=%s, port=%d", clientID, appName, userId, res.MappingPort)
+
+	rJSON(w, http.StatusOK, res)
+}
+
+// handleDeletePort 删除端口
+func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
+	clientID := r.URL.Query().Get("clientid")
+	appName := r.URL.Query().Get("appname")
+	userId := s.getUserId(r)
+
+	if clientID == "" || appName == "" || userId == "" {
+		s.Errorf("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
+		rError(w, http.StatusBadRequest, "Missing clientid or appname parameters")
+		return
+	}
+	ports := s.allocator.ReleasePort(clientID, userId, appName)
+
+	if len(ports) == 0 {
+		s.Errorf("Port not found: clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
+		rError(w, http.StatusNotFound, "Port not found")
+		return
+	}
+	s.Infof("Port removed: clientId=%s,appName=%s,userId=%s, ports=%+v", clientID, appName, userId, ports)
+
+	rJSON(w, http.StatusOK, "Port deleted successfully")
 }

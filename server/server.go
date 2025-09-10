@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,28 +24,33 @@ import (
 
 // Config is the configuration for the cotun service
 type Config struct {
-	KeySeed   string
-	KeyFile   string
-	AuthFile  string
-	Auth      string
-	Proxy     string
-	Socks5    bool
-	Reverse   bool
-	KeepAlive time.Duration
-	TLS       TLSConfig
+	KeySeed     string
+	KeyFile     string
+	AuthFile    string
+	Auth        string
+	Proxy       string
+	Socks5      bool
+	Reverse     bool
+	KeepAlive   time.Duration
+	TLS         TLSConfig
+	ControlPort string // 控制面端口
+	MinPort     int
+	MaxPort     int
 }
 
 // Server respresent a cotun service
 type Server struct {
 	*cio.Logger
-	config       *Config
-	fingerprint  string
-	httpServer   *cnet.HTTPServer
-	reverseProxy *httputil.ReverseProxy
-	sessCount    int32
-	sessions     *settings.Users
-	sshConfig    *ssh.ServerConfig
-	users        *settings.UserIndex
+	config        *Config
+	fingerprint   string
+	httpServer    *cnet.HTTPServer
+	controlServer *cnet.HTTPServer // 控制面服务器
+	reverseProxy  *httputil.ReverseProxy
+	sessCount     int32
+	sessions      *settings.Users
+	sshConfig     *ssh.ServerConfig
+	users         *settings.UserIndex
+	allocator     *PortAllocator
 }
 
 var upgrader = websocket.Upgrader{
@@ -56,10 +62,12 @@ var upgrader = websocket.Upgrader{
 // NewServer creates and returns a new cotun server
 func NewServer(c *Config) (*Server, error) {
 	server := &Server{
-		config:     c,
-		httpServer: cnet.NewHTTPServer(),
-		Logger:     cio.NewLogger("server"),
-		sessions:   settings.NewUsers(),
+		config:        c,
+		httpServer:    cnet.NewHTTPServer(),
+		controlServer: cnet.NewHTTPServer(),
+		Logger:        cio.NewLogger("server"),
+		sessions:      settings.NewUsers(),
+		allocator:     NewPortAllocator(c.MinPort, c.MaxPort),
 	}
 	server.Info = true
 	server.users = settings.NewUserIndex(server.Logger)
@@ -167,6 +175,8 @@ func (s *Server) StartContext(ctx context.Context, host, port string) error {
 	if s.reverseProxy != nil {
 		s.Infof("Reverse proxy enabled")
 	}
+
+	// 启动主HTTP服务器
 	l, err := s.listener(host, port)
 	if err != nil {
 		return err
@@ -177,7 +187,36 @@ func (s *Server) StartContext(ctx context.Context, host, port string) error {
 		o.TrustProxy = true
 		h = requestlog.WrapWith(h, o)
 	}
+
+	// 启动控制面服务器
+	if s.config.ControlPort != "" {
+		go s.startControlServer(ctx)
+	}
+
 	return s.httpServer.GoServe(ctx, l, h)
+}
+
+// startControlServer 启动控制面服务器
+func (s *Server) startControlServer(ctx context.Context) error {
+	controlHost := "0.0.0.0" // 默认监听所有接口
+	controlPort := s.config.ControlPort
+
+	s.Infof("Starting control plane server on %s:%s", controlHost, controlPort)
+
+	l, err := net.Listen("tcp", controlHost+":"+controlPort)
+	if err != nil {
+		s.Errorf("Failed to start control server: %v", err)
+		return err
+	}
+
+	h := http.Handler(http.HandlerFunc(s.handleControlPlaneHandler))
+	if s.Debug {
+		o := requestlog.DefaultOptions
+		o.TrustProxy = true
+		h = requestlog.WrapWith(h, o)
+	}
+
+	return s.controlServer.GoServe(ctx, l, h)
 }
 
 // Wait waits for the http server to close
