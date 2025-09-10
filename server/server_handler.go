@@ -229,11 +229,7 @@ func (s *Server) handleControlPlaneHandler(w http.ResponseWriter, r *http.Reques
 	}
 	switch {
 	case method == "GET":
-		if len(paths) == 5 {
-			s.handleGetPorts(w, r)
-		} else {
-			s.handleGetPort(w, r)
-		}
+		s.handleGetPorts(w, r)
 	case method == "POST":
 		s.handleCreatePort(w, r)
 	case method == "DELETE":
@@ -316,10 +312,13 @@ type PortQueryResponse struct {
 func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 	clientId := r.URL.Query().Get("clientid")
 	appName := r.URL.Query().Get("appname")
-	userId := s.getUserId(r)
+	userId := r.URL.Query().Get("userid")
+	if userId == "" {
+		userId = s.getUserId(r)
+	}
 
 	ports := s.allocator.QueryPorts(clientId, userId, appName)
-	if clientId != "" && appName != "" {
+	if clientId != "" && appName != "" && userId != "" {
 		if len(ports) == 0 {
 			s.Errorf("Port mapping not found: clientId=%s,userId=%s,appName=%s", clientId, userId, appName)
 			rError(w, 404, "Port mapping not found")
@@ -343,7 +342,9 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 		rError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	req.UserId = s.getUserId(r)
+	if req.UserId == "" {
+		req.UserId = s.getUserId(r)
+	}
 
 	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
 		s.Errorf("Missing required fields: %+v", req)
@@ -358,33 +359,6 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Infof("Allocate port: %+v", req)
 	rJSON(w, http.StatusCreated, ret)
-}
-
-// handleGetPort 获取特定客户端和应用的端口信息
-func (s *Server) handleGetPort(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 7 {
-		s.Errorf("Invalid path: %s", r.URL.Path)
-		rError(w, http.StatusBadRequest, "Invalid path")
-		return
-	}
-	// /cotun/api/v1/ports/{clientId}/{appName}
-
-	clientID := pathParts[5]
-	appName := pathParts[6]
-	userId := s.getUserId(r)
-
-	var res PortQueryResponse
-	port, err := s.allocator.LookupPort(clientID, userId, appName)
-	if err != nil {
-		s.Errorf("Port mapping not found: clientId=%s,appName=%s,userId=%s", clientID, appName, userId)
-		rError(w, http.StatusNotFound, "Port mapping not found")
-		return
-	}
-	res.MappingPort = port.MappingPort
-	s.Infof("Port fetch: clientId=%s,appName=%s,userId=%s, port=%d", clientID, appName, userId, res.MappingPort)
-
-	rJSON(w, http.StatusOK, res)
 }
 
 // handleDeletePort 删除端口
