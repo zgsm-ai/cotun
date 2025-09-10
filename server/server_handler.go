@@ -313,6 +313,12 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 	clientId := r.URL.Query().Get("clientid")
 	appName := r.URL.Query().Get("appname")
 	userId := r.URL.Query().Get("userid")
+	paths := strings.Split(r.URL.Path, "/")
+	//	/cotun/api/v1/ports/{client}/{app}
+	if len(paths) == 7 {
+		clientId = paths[5]
+		appName = paths[6]
+	}
 	if userId == "" {
 		userId = s.getUserId(r)
 	}
