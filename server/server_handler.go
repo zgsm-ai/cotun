@@ -391,7 +391,8 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Infof("Allocate port: %+v", req)
-	rJSON(w, http.StatusCreated, ret)
+	rJSON(w, http.StatusOK, ret)
+	// rJSON(w, http.StatusCreated, ret)
 }
 
 // handleDeletePort 删除端口
