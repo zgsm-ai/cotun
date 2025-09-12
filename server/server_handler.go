@@ -11,6 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	chshare "github.com/zgsm-ai/cotun/share"
+	"github.com/zgsm-ai/cotun/share/cio"
 	"github.com/zgsm-ai/cotun/share/cnet"
 	"github.com/zgsm-ai/cotun/share/settings"
 	"github.com/zgsm-ai/cotun/share/tunnel"
@@ -56,42 +57,8 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	id := atomic.AddInt32(&s.sessCount, 1)
 	l := s.Fork("session#%d", id)
 
-	// 从HTTP请求头获取客户端信息
-	clientId := req.Header.Get("X-Client-Id")
-	appName := req.Header.Get("X-App-Name")
-	userId := req.Header.Get("X-User-Id")
-	clientPortStr := req.Header.Get("X-Client-Port")
-	mappingPortStr := req.Header.Get("X-Mapping-Port")
-
-	// 验证客户端信息是否完整
-	if clientId == "" || appName == "" || userId == "" || clientPortStr == "" || mappingPortStr == "" {
-		l.Infof("Missing required client headers: clientId=%s, appName=%s, userId=%s, clientPort=%s,mappingPort=%s",
-			clientId, appName, userId, clientPortStr, mappingPortStr)
-		rError(w, http.StatusForbidden, "Missing required client identification headers")
-		return
-	}
-	clientPort, err := strconv.Atoi(clientPortStr)
-	if err != nil {
-		l.Infof("Invalid fields: clientPort=%s", clientPortStr)
-		rError(w, http.StatusBadRequest, "Invalid fields")
-		return
-	}
-	mappingPort, err := strconv.Atoi(mappingPortStr)
-	if err != nil {
-		l.Infof("Invalid fields: mappingPort=%s", mappingPortStr)
-		rError(w, http.StatusBadRequest, "Invalid fields")
-		return
-	}
-	// 查询allocator验证该客户端是否已分配端口
-	alloc, err := s.allocator.ApplyPort(clientId, userId, appName, clientPort, mappingPort)
-	if err != nil {
-		l.Infof("Client not authorized: clientId=%s, appName=%s, userId=%s, clientPort=%s, mappingPort=%s, error=%v", clientId, appName, userId, clientPortStr, mappingPortStr, err)
-		rError(w, http.StatusForbidden, "Client not authorized - no port allocated")
-		return
-	}
-	alloc.Status = Connected
-
-	l.Infof("Client authorized: clientId=%s, appName=%s, userId=%s, clientPort=%s, mappingPort=%s", clientId, appName, userId, clientPortStr, mappingPortStr)
+	//	处理新版协议（请求头带认证信息）的连接请求
+	alloc := s.handleNewerConnected(w, req, l)
 
 	wsConn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
@@ -153,6 +120,11 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	}
 	//validate remotes
 	for _, r := range c.Remotes {
+		// 处理旧版客户端连接请求(根据mapping-port关联分配记录)
+		alloc = s.handleOlderConnected(w, req, l, alloc, r)
+		if alloc != nil {
+			alloc.ClientVersion = cv
+		}
 		//if user is provided, ensure they have
 		//access to the desired remotes
 		if user != nil {
@@ -205,7 +177,9 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	} else {
 		l.Debugf("Closed connection")
 	}
-	alloc.Status = Allocated
+	if alloc != nil {
+		alloc.Status = Allocated
+	}
 }
 
 // handleControlPlaneHandler 处理控制面API请求
@@ -308,6 +282,58 @@ type PortQueryResponse struct {
 	MappingPort int `json:"mappingPort"`
 }
 
+func (s *Server) handleNewerConnected(w http.ResponseWriter, req *http.Request, l *cio.Logger) *PortAllocation {
+	// 从HTTP请求头获取客户端信息
+	clientId := req.Header.Get("X-Client-Id")
+	appName := req.Header.Get("X-App-Name")
+	userId := req.Header.Get("X-User-Id")
+	clientPortStr := req.Header.Get("X-Client-Port")
+	mappingPortStr := req.Header.Get("X-Mapping-Port")
+
+	if clientId == "" || appName == "" || userId == "" || clientPortStr == "" || mappingPortStr == "" {
+		//头部缺了信息，极可能是老的版本，根据remotes中的mappingPort来关联分配记录吧
+		return nil
+	}
+	clientPort, err := strconv.Atoi(clientPortStr)
+	if err != nil {
+		l.Errorf("Invalid fields: clientPort=%s", clientPortStr)
+		rError(w, http.StatusBadRequest, "Invalid fields")
+		return nil
+	}
+	mappingPort, err := strconv.Atoi(mappingPortStr)
+	if err != nil {
+		l.Errorf("Invalid fields: mappingPort=%s", mappingPortStr)
+		rError(w, http.StatusBadRequest, "Invalid fields")
+		return nil
+	}
+	// 查询allocator验证该客户端是否已分配端口
+	alloc, err := s.allocator.ApplyPort(clientId, userId, appName, clientPort, mappingPort)
+	if err != nil {
+		l.Errorf("Client not authorized: clientId=%s,appName=%s,userId=%s,clientPort=%s,mappingPort=%s,error=%v", clientId, appName, userId, clientPortStr, mappingPortStr, err)
+		rError(w, http.StatusForbidden, "Client not authorized - no port allocated")
+		return nil
+	}
+	alloc.Status = Connected
+	l.Infof("Client authorized: clientId=%s,appName=%s,userId=%s,clientPort=%s,mappingPort=%s", clientId, appName, userId, clientPortStr, mappingPortStr)
+	return alloc
+}
+
+func (s *Server) handleOlderConnected(w http.ResponseWriter, req *http.Request, l *cio.Logger, alloc *PortAllocation, r *settings.Remote) *PortAllocation {
+	if alloc != nil {
+		return alloc
+	}
+	l.Infof("Client authorized: alloc - %+v, remote - %+v", alloc, r)
+	clientPort, _ := strconv.Atoi(r.RemotePort)
+	mappingPort, _ := strconv.Atoi(r.LocalPort)
+
+	alloc, err := s.allocator.ApplyAllocatedPort(clientPort, mappingPort)
+	if err != nil {
+		l.Errorf("Client not authorized: error=%v", err)
+		return nil
+	}
+	return alloc
+}
+
 // handleGetPorts 获取所有端口信息
 func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 	clientId := r.URL.Query().Get("clientid")
@@ -372,8 +398,10 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 	clientID := r.URL.Query().Get("clientid")
 	appName := r.URL.Query().Get("appname")
-	userId := s.getUserId(r)
-
+	userId := r.URL.Query().Get("userid")
+	if userId == "" {
+		userId = s.getUserId(r)
+	}
 	if clientID == "" || appName == "" || userId == "" {
 		s.Errorf("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
 		rError(w, http.StatusBadRequest, "Missing clientid or appname parameters")

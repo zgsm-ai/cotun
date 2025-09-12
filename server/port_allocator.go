@@ -2,6 +2,7 @@ package chserver
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -102,6 +103,21 @@ func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort,
 	}
 	pa.names[key] = alloc
 	pa.ports[mappingPort] = alloc
+	return alloc, nil
+}
+
+func (pa *PortAllocator) ApplyAllocatedPort(clientPort, mappingPort int) (*PortAllocation, error) {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	alloc, exists := pa.ports[mappingPort]
+	if !exists {
+		return nil, fmt.Errorf("port [%d->%d] not exist", clientPort, mappingPort)
+	}
+	if clientPort != alloc.ClientPort {
+		return nil, fmt.Errorf("port [%d] conflict: [%d ~ %d]", alloc.MappingPort, clientPort, alloc.ClientPort)
+	}
+	alloc.Status = Connected
 	return alloc, nil
 }
 
