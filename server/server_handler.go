@@ -396,7 +396,7 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 		rError(w, http.StatusInsufficientStorage, "No available ports")
 		return
 	}
-	s.Infof("Allocate port: %+v", req)
+	s.Infof("Allocate port: %+v, ret: %+v", req, ret)
 	rJSON(w, http.StatusOK, ret)
 	// rJSON(w, http.StatusCreated, ret)
 }
