@@ -122,9 +122,11 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	for _, r := range c.Remotes {
 		// 处理旧版客户端连接请求(根据mapping-port关联分配记录)
 		alloc = s.handleOlderConnected(w, req, l, alloc, r)
-		if alloc != nil {
-			alloc.ClientVersion = cv
+		if alloc == nil {
+			failed(s.Errorf("allocated port failed: %+v", r))
+			return
 		}
+		alloc.ClientVersion = cv
 		//if user is provided, ensure they have
 		//access to the desired remotes
 		if user != nil {
@@ -326,7 +328,7 @@ func (s *Server) handleOlderConnected(w http.ResponseWriter, req *http.Request, 
 	if alloc != nil {
 		return alloc
 	}
-	l.Infof("Client authorized: remote - %+v, RemotePort: %d, LocalPort: %d", r, r.RemotePort, r.LocalPort)
+	l.Infof("Client authorized: remote - %+v, RemotePort: %s, LocalPort: %s", r, r.RemotePort, r.LocalPort)
 	clientPort, _ := strconv.Atoi(r.RemotePort)
 	mappingPort, _ := strconv.Atoi(r.LocalPort)
 

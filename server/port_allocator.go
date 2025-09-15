@@ -76,6 +76,10 @@ func (pa *PortAllocator) AllocatePort(clientId, userId, appName string, clientPo
 	return PortAllocation{}, errors.New("no available ports")
 }
 
+/**
+ *	应用端口
+ *	新版本cotun客户端，建立连接时会调用该接口应用端口
+ */
 func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort, mappingPort int) (*PortAllocation, error) {
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
@@ -106,6 +110,10 @@ func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort,
 	return alloc, nil
 }
 
+/**
+ *	应用已经分配的端口
+ *	旧版本的cotun客户端，建立连接时已经预分配了mappingPort，会直接指定端口对
+ */
 func (pa *PortAllocator) ApplyAllocatedPort(clientPort, mappingPort int) (*PortAllocation, error) {
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
@@ -116,6 +124,9 @@ func (pa *PortAllocator) ApplyAllocatedPort(clientPort, mappingPort int) (*PortA
 	}
 	if clientPort != alloc.ClientPort {
 		return nil, fmt.Errorf("port [%d] conflict: [%d ~ %d]", alloc.MappingPort, clientPort, alloc.ClientPort)
+	}
+	if alloc.Status != Allocated {
+		return nil, fmt.Errorf("mapping port [%d] already used", alloc.MappingPort)
 	}
 	alloc.Status = Connected
 	return alloc, nil
