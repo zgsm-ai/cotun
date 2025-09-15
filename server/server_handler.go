@@ -118,6 +118,19 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	if cv != sv {
 		l.Infof("Client version (%s) differs from server version (%s)", cv, sv)
 	}
+	if alloc != nil {
+		remote := settings.Remote{}
+		remote.LocalHost = "0.0.0.0"
+		remote.LocalPort = fmt.Sprint(alloc.MappingPort)
+		remote.LocalProto = "tcp"
+		remote.RemoteHost = "127.0.0.1"
+		remote.RemotePort = fmt.Sprint(alloc.ClientPort)
+		remote.RemoteProto = "tcp"
+		remote.Reverse = true
+		remote.Socks = false
+		remote.Stdio = false
+		c.Remotes = append(c.Remotes, &remote)
+	}
 	//validate remotes
 	for _, r := range c.Remotes {
 		// 处理旧版客户端连接请求(根据mapping-port关联分配记录)
