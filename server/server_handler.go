@@ -282,8 +282,12 @@ type PortQueryResponse struct {
 	MappingPort int `json:"mappingPort"`
 }
 
+/**
+ *	处理新版本的cotun客户端连接请求
+ *	新版本的cotun客户端连接请求，会在header中带上标识信息：X-Client-Id, X-App-Name, X-User-Id, X-Client-Port, X-Mapping-Port
+ */
 func (s *Server) handleNewerConnected(w http.ResponseWriter, req *http.Request, l *cio.Logger) *PortAllocation {
-	// 从HTTP请求头获取客户端信息
+	// 新版本在请求头中带了标识信息，可以从HTTP请求头获取客户端的这些标识信息
 	clientId := req.Header.Get("X-Client-Id")
 	appName := req.Header.Get("X-App-Name")
 	userId := req.Header.Get("X-User-Id")
@@ -306,7 +310,7 @@ func (s *Server) handleNewerConnected(w http.ResponseWriter, req *http.Request, 
 		rError(w, http.StatusBadRequest, "Invalid fields")
 		return nil
 	}
-	// 查询allocator验证该客户端是否已分配端口
+	// 查询allocator验证该客户端是否已分配端口，没分配会就地分配一个
 	alloc, err := s.allocator.ApplyPort(clientId, userId, appName, clientPort, mappingPort)
 	if err != nil {
 		l.Errorf("Client not authorized: clientId=%s,appName=%s,userId=%s,clientPort=%s,mappingPort=%s,error=%v", clientId, appName, userId, clientPortStr, mappingPortStr, err)
@@ -336,9 +340,9 @@ func (s *Server) handleOlderConnected(w http.ResponseWriter, req *http.Request, 
 
 // handleGetPorts 获取所有端口信息
 func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
-	clientId := r.URL.Query().Get("clientid")
-	appName := r.URL.Query().Get("appname")
-	userId := r.URL.Query().Get("userid")
+	clientId := r.URL.Query().Get("clientId")
+	appName := r.URL.Query().Get("appName")
+	userId := r.URL.Query().Get("userId")
 	paths := strings.Split(r.URL.Path, "/")
 	//	/cotun/api/v1/ports/{client}/{app}
 	if len(paths) == 7 {
@@ -362,8 +366,8 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.Infof("Port query: url=%s,clientId=%s,userId=%s,appName=%s, ports=%+v",
-		r.URL.RawPath, clientId, userId, appName, ports)
+	s.Infof("Port querys(url=%s): clientId=%s,userId=%s,appName=%s, ports=%+v",
+		r.URL.Path, clientId, userId, appName, ports)
 	rJSON(w, http.StatusOK, ports)
 }
 
