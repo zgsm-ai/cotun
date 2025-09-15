@@ -459,6 +459,46 @@ func setString(target *string, opt *string) {
 	}
 }
 
+func parseImplicitArgs() error {
+	// 加载authfile配置
+	// authConfig, err := chclient.LoadAuthFile(*authFile)
+	// if err != nil {
+	// 	log.Fatalf("Failed to load auth file: %v", err)
+	// }
+	// if authConfig != nil {
+	// 	// 设置fingerprint（如果命令行未设置）
+	// 	setString(&config.Fingerprint, authConfig.Fingerprint)
+	// 	setString(&config.Auth, authConfig.Auth)
+
+	// 	// 设置TLS配置（如果命令行未设置）
+	// 	tlsConfig := authConfig.TLS
+	// 	if tlsConfig != nil {
+	// 		setString(&config.TLS.CA, tlsConfig.CA)
+	// 		setString(&config.TLS.Cert, tlsConfig.Cert)
+	// 		setString(&config.TLS.Key, tlsConfig.Key)
+	// 		if !config.TLS.SkipVerify && tlsConfig.SkipVerify != nil {
+	// 			config.TLS.SkipVerify = *tlsConfig.SkipVerify
+	// 		}
+	// 	}
+
+	// 	// 设置headers（合并到现有headers）
+	// 	authHeaders := authConfig.Headers
+	// 	if authHeaders != nil {
+	// 		for key, value := range *authHeaders {
+	// 			config.Headers.Set(key, value)
+	// 		}
+	// 	}
+
+	// 	setString(hostname, authConfig.Hostname)
+	// 	setString(sni, authConfig.SNI)
+	// 	setString(clientId, authConfig.ClientID)
+	// 	setString(appName, authConfig.AppName)
+	// 	setString(userId, authConfig.UserID)
+	// }
+
+	return nil
+}
+
 func client(args []string) {
 	flags := flag.NewFlagSet("client", flag.ContinueOnError)
 	config := chclient.Config{Headers: http.Header{}}
@@ -482,7 +522,6 @@ func client(args []string) {
 	userId := flags.String("user-id", "", "client user ID")
 	clientPort := flags.Int("client-port", 0, "client port")
 	mappingPort := flags.Int("mapping-port", 0, "mapping port")
-	authFile := flags.String("authfile", "", "path to authentication configuration file")
 	flags.Usage = func() {
 		fmt.Print(clientHelp)
 		os.Exit(0)
@@ -495,44 +534,9 @@ func client(args []string) {
 	}
 	config.Server = args[0]
 	config.Remotes = args[1:]
-	config.Remotes = append(config.Remotes, fmt.Sprintf("R:%d:127.0.0.1:%d", *mappingPort, *clientPort))
 
-	// 加载authfile配置
-	if *authFile != "" {
-		authConfig, err := chclient.LoadAuthFile(*authFile)
-		if err != nil {
-			log.Fatalf("Failed to load auth file: %v", err)
-		}
-		if authConfig != nil {
-			// 设置fingerprint（如果命令行未设置）
-			setString(&config.Fingerprint, authConfig.Fingerprint)
-			setString(&config.Auth, authConfig.Auth)
-
-			// 设置TLS配置（如果命令行未设置）
-			tlsConfig := authConfig.TLS
-			if tlsConfig != nil {
-				setString(&config.TLS.CA, tlsConfig.CA)
-				setString(&config.TLS.Cert, tlsConfig.Cert)
-				setString(&config.TLS.Key, tlsConfig.Key)
-				if !config.TLS.SkipVerify && tlsConfig.SkipVerify != nil {
-					config.TLS.SkipVerify = *tlsConfig.SkipVerify
-				}
-			}
-
-			// 设置headers（合并到现有headers）
-			authHeaders := authConfig.Headers
-			if authHeaders != nil {
-				for key, value := range *authHeaders {
-					config.Headers.Set(key, value)
-				}
-			}
-
-			setString(hostname, authConfig.Hostname)
-			setString(sni, authConfig.SNI)
-			setString(clientId, authConfig.ClientID)
-			setString(appName, authConfig.AppName)
-			setString(userId, authConfig.UserID)
-		}
+	if err := parseImplicitArgs(); err != nil {
+		log.Fatalf("parse implicit args failed")
 	}
 
 	//default auth

@@ -7,7 +7,7 @@ RUN go env -w CGO_ENABLED=0 && \
     go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
 
 RUN go mod tidy 
-RUN go build -ldflags="-s -w" -o cotun *.go
+RUN go build -ldflags="-s -w -X 'github.com/zgsm-ai/share.BuildVersion=1.2.0'" -o cotun *.go
 RUN chmod 755 cotun
 
 FROM alpine:3.21 AS runtime

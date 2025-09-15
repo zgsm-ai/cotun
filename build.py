@@ -48,7 +48,9 @@ def last_commit_id():
 # Assemble build command.
 def build_cmd():
     build_flags = []
-
+    if not opt_debug:
+        build_flags.append("-s -w")
+        
     build_flags.append("-X '{0}/share.BuildVersion={1}'".format(opt_module, opt_software))
     last_git_tag = last_tag()
     if last_git_tag != "":
