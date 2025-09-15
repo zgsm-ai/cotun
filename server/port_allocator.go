@@ -57,7 +57,7 @@ func (pa *PortAllocator) AllocatePort(clientId, userId, appName string, clientPo
 
 	for port := pa.minPort; port <= pa.maxPort; port++ {
 		alloc, exists := pa.ports[port]
-		if !exists || alloc.Status != Allocated {
+		if !exists || alloc.Status == Freed {
 			alloc = &PortAllocation{
 				ClientId:    clientId,
 				UserId:      userId,
