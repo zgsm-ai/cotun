@@ -326,7 +326,7 @@ func (s *Server) handleOlderConnected(w http.ResponseWriter, req *http.Request, 
 	if alloc != nil {
 		return alloc
 	}
-	l.Infof("Client authorized: alloc - %+v, remote - %+v", alloc, r)
+	l.Infof("Client authorized: remote - %+v, RemotePort: %d, LocalPort: %d", r, r.RemotePort, r.LocalPort)
 	clientPort, _ := strconv.Atoi(r.RemotePort)
 	mappingPort, _ := strconv.Atoi(r.LocalPort)
 
