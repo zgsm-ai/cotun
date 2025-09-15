@@ -14,9 +14,9 @@ type AuthFileConfig struct {
 	Headers     *map[string]string `json:"headers"`
 	Hostname    *string            `json:"hostname"`
 	SNI         *string            `json:"sni"`
-	ClientID    *string            `json:"clientid"`
-	AppName     *string            `json:"appname"`
-	UserID      *string            `json:"userid"`
+	ClientID    *string            `json:"clientId"`
+	AppName     *string            `json:"appName"`
+	UserID      *string            `json:"userId"`
 }
 
 // AuthTLSConfig represents TLS-related authentication configuration

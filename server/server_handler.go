@@ -401,15 +401,15 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 
 // handleDeletePort 删除端口
 func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
-	clientID := r.URL.Query().Get("clientid")
-	appName := r.URL.Query().Get("appname")
-	userId := r.URL.Query().Get("userid")
+	clientID := r.URL.Query().Get("clientId")
+	appName := r.URL.Query().Get("appName")
+	userId := r.URL.Query().Get("userId")
 	if userId == "" {
 		userId = s.getUserId(r)
 	}
 	if clientID == "" || appName == "" || userId == "" {
 		s.Errorf("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
-		rError(w, http.StatusBadRequest, "Missing clientid or appname parameters")
+		rError(w, http.StatusBadRequest, "Missing clientId or appName parameters")
 		return
 	}
 	ports := s.allocator.ReleasePort(clientID, userId, appName)

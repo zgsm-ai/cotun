@@ -180,10 +180,10 @@ var serverHelp = `
     instead of the system roots. This is commonly used to implement mutual-TLS.
 
     --control-port, Control plane port, used for managing port information. Supports the following API endpoints:
-      GET /api/v1/ports - Get all port information
-      POST /api/v1/ports - Create new port
-      GET /api/v1/ports/{clientid}/{appname} - Get port information for specific client and application
-      DELETE /api/v1/ports?clientid=xx&appname=xx - Delete port
+      GET /{moduleName}/api/v1/ports - Get all port information
+      POST /{moduleName}/api/v1/ports - Create new port
+      GET /{moduleName}/api/v1/ports/{clientId}/{appName} - Get port information for specific client and application
+      DELETE /{moduleName}/api/v1/ports?clientId=xx&appName=xx - Delete port
       Default port is 7890.
 ` + commonHelp
 
