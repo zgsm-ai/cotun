@@ -118,7 +118,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	if cv != sv {
 		l.Infof("Client version (%s) differs from server version (%s)", cv, sv)
 	}
-	l.Debugf("Client authorization, config: %+v", c)
+	l.Infof("Client authorization, config: %+v", c)
 	if alloc != nil {
 		remote := settings.Remote{}
 		remote.LocalHost = "0.0.0.0"
@@ -189,9 +189,9 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	})
 	err = eg.Wait()
 	if err != nil && !strings.HasSuffix(err.Error(), "EOF") {
-		l.Debugf("Closed connection (%s)", err)
+		l.Errorf("Closed connection (%s)", err)
 	} else {
-		l.Debugf("Closed connection")
+		l.Infof("Closed connection: %+v", alloc)
 	}
 	if alloc != nil {
 		alloc.Status = Allocated
@@ -312,7 +312,7 @@ func (s *Server) handleNewerConnected(w http.ResponseWriter, req *http.Request, 
 
 	if clientId == "" || appName == "" || userId == "" || clientPortStr == "" || mappingPortStr == "" {
 		//头部缺了信息，极可能是老的版本，根据remotes中的mappingPort来关联分配记录吧
-		l.Debugf("request header: %+v", req.Header)
+		l.Infof("request header: %+v", req.Header)
 		return nil
 	}
 	clientPort, err := strconv.Atoi(clientPortStr)
