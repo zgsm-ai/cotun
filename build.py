@@ -61,23 +61,15 @@ def build_cmd():
         build_flags.append("-X '{0}/cmd.BuildCommitId={1}'".format(opt_module, commit_id))
 
     # current time
-    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(opt_module, 
-        time.strftime("%Y-%m-%d %H:%M:%S")))
+    build_flags.append("-X '{0}/cmd.BuildTime={1}'".format(opt_module, time.strftime("%Y-%m-%d %H:%M:%S")))
 
-    debug_flag = ""
-    if opt_debug:
-        debug_flag = '-gcflags=all="-N -l"'
+    debugf = '-gcflags=all="-N -l"' if opt_debug else ""
+    envf = get_go_env_vars()
+    outf = opt_output if opt_output else opt_app
+    subf = "install" if opt_install else "build"
+    buildf = " ".join(build_flags)
 
-    go_env = get_go_env_vars()
-    
-    global opt_output
-    if not opt_output:
-        opt_output = opt_app
-
-    if opt_install:
-        return '{0} go install {1} -ldflags "{2}" -o {3} ./client-main'.format(go_env, debug_flag, " ".join(build_flags), opt_output)
-    else:
-        return '{0} go build {1} -ldflags "{2}" -o {3} ./client-main'.format(go_env, debug_flag, " ".join(build_flags), opt_output)
+    return '{0} go {1} {2} -ldflags "{3}" -o {4} ./client-main'.format(envf, subf, debugf, buildf, outf)
 
 def parse_opts():
     global opt_debug
