@@ -143,14 +143,13 @@ func (pa *PortAllocator) ReleasePort(clientId, userId, appName string) []PortAll
 
 	allocs := []PortAllocation{}
 	if appName == "" || userId == "" {
-		for key, alloc := range pa.names {
+		for _, alloc := range pa.names {
 			if alloc.Status == Freed {
 				continue
 			}
 			if alloc.ClientId == clientId {
 				alloc.Status = Freed
 				allocs = append(allocs, *alloc)
-				delete(pa.names, key)
 			}
 		}
 		return allocs
@@ -160,7 +159,11 @@ func (pa *PortAllocator) ReleasePort(clientId, userId, appName string) []PortAll
 	if alloc, exists := pa.names[key]; exists {
 		alloc.Status = Freed
 		allocs = append(allocs, *alloc)
+	}
+	for _, a := range allocs {
+		key := a.ClientId + "-" + a.UserId + "-" + a.AppName
 		delete(pa.names, key)
+		delete(pa.ports, a.MappingPort)
 	}
 	return allocs
 }

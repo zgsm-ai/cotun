@@ -70,6 +70,10 @@ def build_cmd():
 
     go_env = get_go_env_vars()
     
+    global opt_output
+    if not opt_output:
+        opt_output = opt_app
+
     if opt_install:
         return '{0} go install {1} -ldflags "{2}" -o {3} ./client-main'.format(go_env, debug_flag, " ".join(build_flags), opt_output)
     else:
@@ -139,8 +143,6 @@ def parse_opts():
                 raise Exception("--cgo_enabled value must be 0 or 1")
             opt_cgo_enabled = int(value)
         i += 1
-    if not opt_output:
-        opt_output = opt_app
     return True
 
 # main
