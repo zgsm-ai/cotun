@@ -114,7 +114,7 @@ func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort,
  *	应用已经分配的端口
  *	旧版本的cotun客户端，建立连接时已经预分配了mappingPort，会直接指定端口对
  */
-func (pa *PortAllocator) ApplyAllocatedPort(clientPort, mappingPort int) (*PortAllocation, error) {
+func (pa *PortAllocator) ApplyAllocatedPort(c *PortAllocation, clientPort, mappingPort int) (*PortAllocation, error) {
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
 
@@ -122,8 +122,17 @@ func (pa *PortAllocator) ApplyAllocatedPort(clientPort, mappingPort int) (*PortA
 	if !exists {
 		return nil, fmt.Errorf("port [%d->%d] not exist", clientPort, mappingPort)
 	}
+	if c.ClientId != "" && alloc.ClientId != c.ClientId {
+		return nil, fmt.Errorf("port [%d] 'clientId' conflict: [%s ~ %s]", alloc.MappingPort, c.ClientId, alloc.ClientId)
+	}
+	if c.UserId != "" && alloc.UserId != c.UserId {
+		return nil, fmt.Errorf("port [%d] 'userId' conflict: [%s ~ %s]", alloc.MappingPort, c.UserId, alloc.UserId)
+	}
+	if c.AppName != "" && alloc.AppName != c.AppName {
+		return nil, fmt.Errorf("port [%d] 'appName' conflict: [%s ~ %s]", alloc.MappingPort, c.AppName, alloc.AppName)
+	}
 	if clientPort != alloc.ClientPort {
-		return nil, fmt.Errorf("port [%d] conflict: [%d ~ %d]", alloc.MappingPort, clientPort, alloc.ClientPort)
+		return nil, fmt.Errorf("port [%d] 'clientPort' conflict: [%d ~ %d]", alloc.MappingPort, clientPort, alloc.ClientPort)
 	}
 	if alloc.Status != Allocated {
 		return nil, fmt.Errorf("mapping port [%d] already used", alloc.MappingPort)

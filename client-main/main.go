@@ -193,8 +193,6 @@ var clientHelp = `
     --client-id, Client ID, will be added to HTTP request headers as X-Client-Id.
     --app-name, Application name, will be added to HTTP request headers as X-App-Name.
     --user-id, User ID, will be added to HTTP request headers as X-User-Id.
-    --client-port, Client application listen port
-    --mapping-port, Cloud mapping port
 ` + commonHelp
 
 type AuthConfig struct {
@@ -260,8 +258,12 @@ func parseImplicitArgs(headers *http.Header, opts OptionsConfig) error {
 		if f == nil {
 			return os.ErrNotExist
 		}
-		if err := f.Value.Set(v); err != nil {
-			return err
+		// 仅在命令行选项未设置值的时候才调用 f.Value.Set
+		// 通过检查标志的当前值是否等于默认值来判断是否被设置
+		if current := f.Value.String(); current == f.DefValue {
+			if err := f.Value.Set(v); err != nil {
+				return err
+			}
 		}
 	}
 	for k, v := range opts.Headers {
@@ -292,8 +294,6 @@ func main() {
 	clientId := flag.String("client-id", "", "client machine ID")
 	appName := flag.String("app-name", "", "client application name")
 	userId := flag.String("user-id", "", "client user ID")
-	clientPort := flag.Int("client-port", 0, "client port")
-	mappingPort := flag.Int("mapping-port", 0, "mapping port")
 	flag.Usage = func() {
 		fmt.Print(clientHelp)
 		os.Exit(0)
@@ -328,7 +328,7 @@ func main() {
 	if config.Server == "" {
 		log.Fatalf("A server is required")
 	}
-	if len(config.Remotes) == 0 && (*clientPort == 0 || *mappingPort == 0) {
+	if len(config.Remotes) == 0 {
 		log.Fatalf("Remotes is required")
 	}
 	//default auth
@@ -354,12 +354,6 @@ func main() {
 	}
 	if *userId != "" {
 		config.Headers.Set("X-User-Id", *userId)
-	}
-	if *clientPort != 0 {
-		config.Headers.Set("X-Client-Port", fmt.Sprint(*clientPort))
-	}
-	if *mappingPort != 0 {
-		config.Headers.Set("X-Mapping-Port", fmt.Sprint(*mappingPort))
 	}
 
 	//ready

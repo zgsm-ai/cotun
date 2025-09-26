@@ -45,7 +45,7 @@ func generatePidFile() {
 }
 
 var serverHelp = `
-  Usage: cotun server [options]
+  Usage: cotund [options]
 
   Options:
 
@@ -54,10 +54,6 @@ var serverHelp = `
 
     --port, -p, Defines the HTTP listening port (defaults to the environment
     variable PORT and fallsback to port 8080).
-
-    --minport, Defines the minimum port for port allocation (defaults to 30000).
-
-    --maxport, Defines the maximum port for port allocation (defaults to 31000).
 
     --key, (deprecated use --keygen and --keyfile instead)
     An optional string to seed the generation of a ECDSA public
@@ -129,6 +125,10 @@ var serverHelp = `
     holding multiple PEM encode CA certificate bundle files, which is used to
     validate client connections. The provided CA certificates will be used
     instead of the system roots. This is commonly used to implement mutual-TLS.
+
+    --minport, Defines the minimum port for port allocation (defaults to 30000).
+
+    --maxport, Defines the maximum port for port allocation (defaults to 31000).
 
     --control-port, Control plane port, used for managing port information. Supports the following API endpoints:
       GET /{moduleName}/api/v1/ports - Get all port information

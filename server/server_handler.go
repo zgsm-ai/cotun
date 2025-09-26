@@ -57,8 +57,10 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	id := atomic.AddInt32(&s.sessCount, 1)
 	l := s.Fork("session#%d", id)
 
-	//	处理新版协议（请求头带认证信息）的连接请求
-	alloc := s.handleNewerConnected(w, req, l)
+	alloc := s.handleRequestHeader(w, req, l)
+	if alloc == nil {
+		return
+	}
 
 	wsConn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
@@ -118,8 +120,9 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	if cv != sv {
 		l.Infof("Client version (%s) differs from server version (%s)", cv, sv)
 	}
-	l.Infof("Client authorization, config: %+v", c)
-	if alloc != nil {
+	alloc.ClientVersion = cv
+	//	处理新版协议（请求头带认证信息）的连接请求
+	if alloc.MappingPort != 0 && alloc.ClientPort != 0 {
 		remote := settings.Remote{}
 		remote.LocalHost = "0.0.0.0"
 		remote.LocalPort = fmt.Sprint(alloc.MappingPort)
@@ -132,15 +135,15 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 		remote.Stdio = false
 		c.Remotes = append(c.Remotes, &remote)
 	}
+	l.Infof("Client connect: config=%+v, alloc=%+v", c, alloc)
 	//validate remotes
 	for _, r := range c.Remotes {
-		// 处理旧版客户端连接请求(根据mapping-port关联分配记录)
-		alloc = s.handleOlderConnected(w, req, l, alloc, r)
+		//	处理remote选项(R:30001:127.0.0.1:9001)
+		alloc = s.handleRemote(w, req, l, alloc, r)
 		if alloc == nil {
 			failed(s.Errorf("allocated port failed: %+v", r))
 			return
 		}
-		alloc.ClientVersion = cv
 		//if user is provided, ensure they have
 		//access to the desired remotes
 		if user != nil {
@@ -189,13 +192,11 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	})
 	err = eg.Wait()
 	if err != nil && !strings.HasSuffix(err.Error(), "EOF") {
-		l.Errorf("Closed connection (%s)", err)
+		l.Infof("Closed connection (%s)", err)
 	} else {
 		l.Infof("Closed connection: %+v", alloc)
 	}
-	if alloc != nil {
-		alloc.Status = Allocated
-	}
+	alloc.Status = Allocated
 }
 
 // handleControlPlaneHandler 处理控制面API请求
@@ -302,56 +303,74 @@ type PortQueryResponse struct {
  *	处理新版本的cotun客户端连接请求
  *	新版本的cotun客户端连接请求，会在header中带上标识信息：X-Client-Id, X-App-Name, X-User-Id, X-Client-Port, X-Mapping-Port
  */
-func (s *Server) handleNewerConnected(w http.ResponseWriter, req *http.Request, l *cio.Logger) *PortAllocation {
+func (s *Server) handleRequestHeader(w http.ResponseWriter, req *http.Request, l *cio.Logger) *PortAllocation {
 	// 新版本在请求头中带了标识信息，可以从HTTP请求头获取客户端的这些标识信息
-	clientId := req.Header.Get("X-Client-Id")
-	appName := req.Header.Get("X-App-Name")
-	userId := req.Header.Get("X-User-Id")
+	var err error
+	c := &PortAllocation{}
+	c.Status = Freed
+	c.ClientId = req.Header.Get("X-Client-Id")
+	c.AppName = req.Header.Get("X-App-Name")
+	c.UserId = req.Header.Get("X-User-Id")
 	clientPortStr := req.Header.Get("X-Client-Port")
 	mappingPortStr := req.Header.Get("X-Mapping-Port")
 
-	if clientId == "" || appName == "" || userId == "" || clientPortStr == "" || mappingPortStr == "" {
-		//头部缺了信息，极可能是老的版本，根据remotes中的mappingPort来关联分配记录吧
-		l.Infof("request header: %+v", req.Header)
-		return nil
+	if clientPortStr != "" {
+		c.ClientPort, err = strconv.Atoi(clientPortStr)
+		if err != nil {
+			l.Infof("Invalid fields: clientPort=%s", clientPortStr)
+			rError(w, http.StatusBadRequest, "Invalid fields")
+			return nil
+		}
 	}
-	clientPort, err := strconv.Atoi(clientPortStr)
-	if err != nil {
-		l.Errorf("Invalid fields: clientPort=%s", clientPortStr)
-		rError(w, http.StatusBadRequest, "Invalid fields")
-		return nil
+	if mappingPortStr != "" {
+		c.MappingPort, err = strconv.Atoi(mappingPortStr)
+		if err != nil {
+			l.Infof("Invalid fields: mappingPort=%s", mappingPortStr)
+			rError(w, http.StatusBadRequest, "Invalid fields")
+			return nil
+		}
 	}
-	mappingPort, err := strconv.Atoi(mappingPortStr)
-	if err != nil {
-		l.Errorf("Invalid fields: mappingPort=%s", mappingPortStr)
-		rError(w, http.StatusBadRequest, "Invalid fields")
-		return nil
+	if c.ClientId == "" || c.AppName == "" || c.UserId == "" || c.ClientPort == 0 || c.MappingPort == 0 {
+		//头部缺了信息，先把状态置为freed，后面补充信息后再正式从s.allocator分配
+		return c
 	}
 	// 查询allocator验证该客户端是否已分配端口，没分配会就地分配一个
-	alloc, err := s.allocator.ApplyPort(clientId, userId, appName, clientPort, mappingPort)
+	alloc, err := s.allocator.ApplyPort(c.ClientId, c.UserId, c.AppName, c.ClientPort, c.MappingPort)
 	if err != nil {
-		l.Errorf("Client not authorized: clientId=%s,appName=%s,userId=%s,clientPort=%s,mappingPort=%s,error=%v", clientId, appName, userId, clientPortStr, mappingPortStr, err)
+		l.Infof("Client not authorized: connect=%+v,error=%v", c, err)
 		rError(w, http.StatusForbidden, "Client not authorized - no port allocated")
 		return nil
 	}
-	alloc.Status = Connected
-	l.Infof("Client authorized: clientId=%s,appName=%s,userId=%s,clientPort=%s,mappingPort=%s", clientId, appName, userId, clientPortStr, mappingPortStr)
+	l.Infof("Client authorized: alloc=%+v", alloc)
 	return alloc
 }
 
-func (s *Server) handleOlderConnected(w http.ResponseWriter, req *http.Request, l *cio.Logger, alloc *PortAllocation, r *settings.Remote) *PortAllocation {
-	if alloc != nil {
+/**
+ *	处理R:32001:127.0.0.1:7009这样的映射选项
+ */
+func (s *Server) handleRemote(w http.ResponseWriter, req *http.Request, l *cio.Logger, alloc *PortAllocation, r *settings.Remote) *PortAllocation {
+	if alloc != nil && alloc.Status != Freed {
 		return alloc
 	}
-	l.Infof("Client authorized: remote - %+v, RemotePort: %s, LocalPort: %s", r, r.RemotePort, r.LocalPort)
+	if !r.Reverse {
+		return alloc
+	}
 	clientPort, _ := strconv.Atoi(r.RemotePort)
 	mappingPort, _ := strconv.Atoi(r.LocalPort)
 
-	alloc, err := s.allocator.ApplyAllocatedPort(clientPort, mappingPort)
+	if alloc.ClientPort != 0 && alloc.ClientPort != clientPort {
+		return alloc
+	}
+	if alloc.MappingPort != 0 && alloc.MappingPort != mappingPort {
+		return alloc
+	}
+
+	alloc, err := s.allocator.ApplyAllocatedPort(alloc, clientPort, mappingPort)
 	if err != nil {
-		l.Errorf("Client not authorized: error=%v", err)
+		l.Infof("Client not authorized: error=%v", err)
 		return nil
 	}
+	l.Infof("Client authorized: remote=%+v, alloc=%+v", r, alloc)
 	return alloc
 }
 
@@ -373,7 +392,7 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 	ports := s.allocator.QueryPorts(clientId, userId, appName)
 	if clientId != "" && appName != "" && userId != "" {
 		if len(ports) == 0 {
-			s.Errorf("Port mapping not found: clientId=%s,userId=%s,appName=%s", clientId, userId, appName)
+			s.Infof("Port mapping not found: clientId=%s,userId=%s,appName=%s", clientId, userId, appName)
 			rError(w, 404, "Port mapping not found")
 			return
 		}
@@ -392,7 +411,7 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 	var req PortAllocationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.Errorf("Invalid request body")
+		s.Infof("Invalid request body")
 		rError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
@@ -401,13 +420,13 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
-		s.Errorf("Missing required fields: %+v", req)
+		s.Infof("Missing required fields: %+v", req)
 		rError(w, http.StatusBadRequest, "Missing required fields")
 		return
 	}
 	ret, err := s.allocator.AllocatePort(req.ClientId, req.UserId, req.AppName, req.ClientPort)
 	if err != nil {
-		s.Errorf("No available ports: %+v", req)
+		s.Infof("No available ports: %+v", req)
 		rError(w, http.StatusInsufficientStorage, "No available ports")
 		return
 	}
@@ -425,14 +444,14 @@ func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 		userId = s.getUserId(r)
 	}
 	if clientID == "" || appName == "" || userId == "" {
-		s.Errorf("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
+		s.Infof("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
 		rError(w, http.StatusBadRequest, "Missing clientId or appName parameters")
 		return
 	}
 	ports := s.allocator.ReleasePort(clientID, userId, appName)
 
 	if len(ports) == 0 {
-		s.Errorf("Port not found: clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
+		s.Infof("Port not found: clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
 		rError(w, http.StatusNotFound, "Port not found")
 		return
 	}
