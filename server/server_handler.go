@@ -57,10 +57,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	id := atomic.AddInt32(&s.sessCount, 1)
 	l := s.Fork("session#%d", id)
 
-	alloc := s.handleRequestHeader(w, req, l)
-	if alloc == nil {
-		return
-	}
+	alloc := s.handleRequestHeader(req)
 
 	wsConn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
@@ -121,20 +118,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 		l.Infof("Client version (%s) differs from server version (%s)", cv, sv)
 	}
 	alloc.ClientVersion = cv
-	//	处理新版协议（请求头带认证信息）的连接请求
-	if alloc.MappingPort != 0 && alloc.ClientPort != 0 {
-		remote := settings.Remote{}
-		remote.LocalHost = "0.0.0.0"
-		remote.LocalPort = fmt.Sprint(alloc.MappingPort)
-		remote.LocalProto = "tcp"
-		remote.RemoteHost = "127.0.0.1"
-		remote.RemotePort = fmt.Sprint(alloc.ClientPort)
-		remote.RemoteProto = "tcp"
-		remote.Reverse = true
-		remote.Socks = false
-		remote.Stdio = false
-		c.Remotes = append(c.Remotes, &remote)
-	}
 	l.Infof("Client connect: config=%+v, alloc=%+v", c, alloc)
 	//validate remotes
 	for _, r := range c.Remotes {
@@ -300,49 +283,17 @@ type PortQueryResponse struct {
 }
 
 /**
- *	处理新版本的cotun客户端连接请求
- *	新版本的cotun客户端连接请求，会在header中带上标识信息：X-Client-Id, X-App-Name, X-User-Id, X-Client-Port, X-Mapping-Port
+ *	处理新版本的cotun客户端连接请求的http头部
+ *	新版本的cotun客户端连接请求，会在header中带上标识信息：X-Client-Id, X-App-Name, X-User-Id
  */
-func (s *Server) handleRequestHeader(w http.ResponseWriter, req *http.Request, l *cio.Logger) *PortAllocation {
+func (s *Server) handleRequestHeader(req *http.Request) *PortAllocation {
 	// 新版本在请求头中带了标识信息，可以从HTTP请求头获取客户端的这些标识信息
-	var err error
 	c := &PortAllocation{}
 	c.Status = Freed
 	c.ClientId = req.Header.Get("X-Client-Id")
 	c.AppName = req.Header.Get("X-App-Name")
 	c.UserId = req.Header.Get("X-User-Id")
-	clientPortStr := req.Header.Get("X-Client-Port")
-	mappingPortStr := req.Header.Get("X-Mapping-Port")
-
-	if clientPortStr != "" {
-		c.ClientPort, err = strconv.Atoi(clientPortStr)
-		if err != nil {
-			l.Infof("Invalid fields: clientPort=%s", clientPortStr)
-			rError(w, http.StatusBadRequest, "Invalid fields")
-			return nil
-		}
-	}
-	if mappingPortStr != "" {
-		c.MappingPort, err = strconv.Atoi(mappingPortStr)
-		if err != nil {
-			l.Infof("Invalid fields: mappingPort=%s", mappingPortStr)
-			rError(w, http.StatusBadRequest, "Invalid fields")
-			return nil
-		}
-	}
-	if c.ClientId == "" || c.AppName == "" || c.UserId == "" || c.ClientPort == 0 || c.MappingPort == 0 {
-		//头部缺了信息，先把状态置为freed，后面补充信息后再正式从s.allocator分配
-		return c
-	}
-	// 查询allocator验证该客户端是否已分配端口，没分配会就地分配一个
-	alloc, err := s.allocator.ApplyPort(c.ClientId, c.UserId, c.AppName, c.ClientPort, c.MappingPort)
-	if err != nil {
-		l.Infof("Client not authorized: connect=%+v,error=%v", c, err)
-		rError(w, http.StatusForbidden, "Client not authorized - no port allocated")
-		return nil
-	}
-	l.Infof("Client authorized: alloc=%+v", alloc)
-	return alloc
+	return c
 }
 
 /**
@@ -365,12 +316,12 @@ func (s *Server) handleRemote(w http.ResponseWriter, req *http.Request, l *cio.L
 		return alloc
 	}
 
-	alloc, err := s.allocator.ApplyAllocatedPort(alloc, clientPort, mappingPort)
+	alloc, err := s.allocator.ApplyPort(alloc, clientPort, mappingPort)
 	if err != nil {
-		l.Infof("Client not authorized: error=%v", err)
+		l.Infof("Client apply error: %v", err)
 		return nil
 	}
-	l.Infof("Client authorized: remote=%+v, alloc=%+v", r, alloc)
+	l.Infof("Client applied: remote=%+v, alloc=%+v", r, alloc)
 	return alloc
 }
 
@@ -411,7 +362,7 @@ func (s *Server) handleGetPorts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 	var req PortAllocationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.Infof("Invalid request body")
+		s.Infof("Client allocate error: Invalid request body")
 		rError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
@@ -420,22 +371,20 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
-		s.Infof("Missing required fields: %+v", req)
+		s.Infof("Client allocate error: req: %+v, error: missing required fields", req)
 		rError(w, http.StatusBadRequest, "Missing required fields")
 		return
 	}
 	ret, err := s.allocator.AllocatePort(req.ClientId, req.UserId, req.AppName, req.ClientPort)
 	if err != nil {
-		s.Infof("No available ports: %+v", req)
+		s.Infof("Client allocate error: req: %+v, error: %v", req, err)
 		rError(w, http.StatusInsufficientStorage, "No available ports")
 		return
 	}
-	s.Infof("Allocate port: %+v, ret: %+v", req, ret)
+	s.Infof("Client allocated: req: %+v, ret: %+v", req, ret)
 	rJSON(w, http.StatusOK, ret)
-	// rJSON(w, http.StatusCreated, ret)
 }
 
-// handleDeletePort 删除端口
 func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 	clientID := r.URL.Query().Get("clientId")
 	appName := r.URL.Query().Get("appName")
@@ -444,18 +393,17 @@ func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 		userId = s.getUserId(r)
 	}
 	if clientID == "" || appName == "" || userId == "" {
-		s.Infof("Missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
-		rError(w, http.StatusBadRequest, "Missing clientId or appName parameters")
+		s.Infof("Client free error: URL(%s) missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
+		rError(w, http.StatusBadRequest, "Missing parameters")
 		return
 	}
 	ports := s.allocator.ReleasePort(clientID, userId, appName)
-
 	if len(ports) == 0 {
-		s.Infof("Port not found: clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
+		s.Infof("Client free error: Port not found, clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
 		rError(w, http.StatusNotFound, "Port not found")
 		return
 	}
-	s.Infof("Port removed: clientId=%s,appName=%s,userId=%s, ports=%+v", clientID, appName, userId, ports)
+	s.Infof("Client freed: clientId=%s,appName=%s,userId=%s, ports=%+v", clientID, appName, userId, ports)
 
 	rJSON(w, http.StatusOK, "Port deleted successfully")
 }

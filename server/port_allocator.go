@@ -76,14 +76,8 @@ func (pa *PortAllocator) AllocatePort(clientId, userId, appName string, clientPo
 	return PortAllocation{}, errors.New("no available ports")
 }
 
-/**
- *	应用端口
- *	新版本cotun客户端，建立连接时会调用该接口应用端口
- */
-func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort, mappingPort int) (*PortAllocation, error) {
-	pa.mu.Lock()
-	defer pa.mu.Unlock()
-
+func (pa *PortAllocator) applyNew(clientId, userId, appName string, clientPort, mappingPort int) (*PortAllocation, error) {
+	//	先找该客户端的分配记录
 	key := clientId + "-" + userId + "-" + appName
 	if alloc, exists := pa.names[key]; exists {
 		if clientPort != alloc.ClientPort || mappingPort != alloc.MappingPort {
@@ -92,6 +86,8 @@ func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort,
 		alloc.Status = Connected
 		return alloc, nil
 	}
+	//	如果没找到，说明之前没申请过，可能是因为cotund重启，导致客户端使用原端口重新连接
+	//	此时只需要保证该端口还未被占用，即可直接给该客户端使用了
 	if _, exists := pa.ports[mappingPort]; exists {
 		return nil, errors.New("port conflict")
 	}
@@ -110,35 +106,34 @@ func (pa *PortAllocator) ApplyPort(clientId, userId, appName string, clientPort,
 	return alloc, nil
 }
 
-/**
- *	应用已经分配的端口
- *	旧版本的cotun客户端，建立连接时已经预分配了mappingPort，会直接指定端口对
- */
-func (pa *PortAllocator) ApplyAllocatedPort(c *PortAllocation, clientPort, mappingPort int) (*PortAllocation, error) {
-	pa.mu.Lock()
-	defer pa.mu.Unlock()
-
+func (pa *PortAllocator) applyOld(clientPort, mappingPort int) (*PortAllocation, error) {
 	alloc, exists := pa.ports[mappingPort]
 	if !exists {
 		return nil, fmt.Errorf("port [%d->%d] not exist", clientPort, mappingPort)
-	}
-	if c.ClientId != "" && alloc.ClientId != c.ClientId {
-		return nil, fmt.Errorf("port [%d] 'clientId' conflict: [%s ~ %s]", alloc.MappingPort, c.ClientId, alloc.ClientId)
-	}
-	if c.UserId != "" && alloc.UserId != c.UserId {
-		return nil, fmt.Errorf("port [%d] 'userId' conflict: [%s ~ %s]", alloc.MappingPort, c.UserId, alloc.UserId)
-	}
-	if c.AppName != "" && alloc.AppName != c.AppName {
-		return nil, fmt.Errorf("port [%d] 'appName' conflict: [%s ~ %s]", alloc.MappingPort, c.AppName, alloc.AppName)
 	}
 	if clientPort != alloc.ClientPort {
 		return nil, fmt.Errorf("port [%d] 'clientPort' conflict: [%d ~ %d]", alloc.MappingPort, clientPort, alloc.ClientPort)
 	}
 	if alloc.Status != Allocated {
-		return nil, fmt.Errorf("mapping port [%d] already used", alloc.MappingPort)
+		return nil, fmt.Errorf("port [%d] already used: %+v", alloc.MappingPort, alloc)
 	}
 	alloc.Status = Connected
 	return alloc, nil
+}
+
+/**
+ *	应用已经分配的端口
+ *	旧版本的cotun客户端，只有两个有效参数clientPort, mappingPort
+ *	新版本的cotun客户端，会在http请求头中携带X-Client-Id, X-User-Id, X-App-Name
+ */
+func (pa *PortAllocator) ApplyPort(c *PortAllocation, clientPort, mappingPort int) (*PortAllocation, error) {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	if c.ClientId != "" && c.UserId != "" && c.AppName != "" {
+		return pa.applyNew(c.ClientId, c.UserId, c.AppName, clientPort, mappingPort)
+	}
+	return pa.applyOld(clientPort, mappingPort)
 }
 
 /**
