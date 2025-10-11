@@ -6,11 +6,11 @@ WORKDIR /src
 ENV CGO_ENABLED=0
 RUN go build \
     -ldflags "-X github.com/zgsm-ai/cotun/share.BuildVersion=$(git describe --abbrev=0 --tags)" \
-    -o /tmp/bin
+    -o /tmp/cotund server-main/*.go
 # run stage
 FROM scratch
-LABEL maintainer="dev@jpillora.com"
+LABEL maintainer="zgsm@sangfor.com.cn"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 WORKDIR /app
-COPY --from=build /tmp/bin /app/bin
-ENTRYPOINT ["/app/bin"]
+COPY --from=build /tmp/cotund /app/cotund
+ENTRYPOINT ["/app/cotund"]

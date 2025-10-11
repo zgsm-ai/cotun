@@ -80,16 +80,19 @@ func (pa *PortAllocator) applyNew(clientId, userId, appName string, clientPort, 
 	//	先找该客户端的分配记录
 	key := clientId + "-" + userId + "-" + appName
 	if alloc, exists := pa.names[key]; exists {
-		if clientPort != alloc.ClientPort || mappingPort != alloc.MappingPort {
-			return nil, errors.New("port conflict")
+		if clientPort != alloc.ClientPort {
+			return nil, fmt.Errorf("client port conflict: %d - %d", clientPort, alloc.ClientPort)
+		}
+		if mappingPort != alloc.MappingPort {
+			return nil, fmt.Errorf("mapping port conflict: %d - %d", mappingPort, alloc.MappingPort)
 		}
 		alloc.Status = Connected
 		return alloc, nil
 	}
 	//	如果没找到，说明之前没申请过，可能是因为cotund重启，导致客户端使用原端口重新连接
 	//	此时只需要保证该端口还未被占用，即可直接给该客户端使用了
-	if _, exists := pa.ports[mappingPort]; exists {
-		return nil, errors.New("port conflict")
+	if p, exists := pa.ports[mappingPort]; exists {
+		return nil, fmt.Errorf("mapping port already allocated to: %+v", p)
 	}
 
 	alloc := &PortAllocation{
