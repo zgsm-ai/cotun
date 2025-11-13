@@ -67,7 +67,11 @@ jobs:
           target: runtime
           platforms: linux/amd64
           push: true
-          tags: ${{ secrets.DOCKERHUB_REPOSITORY }}/cotun:${{ steps.version.outputs.version }},${{ secrets.DOCKERHUB_REPOSITORY }}/cotun:latest
+          build-args: |
+            COTUND_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ secrets.DOCKERHUB_REPOSITORY }}/cotun:${{ steps.version.outputs.version }}
+            ${{ secrets.DOCKERHUB_REPOSITORY }}/cotun:latest
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -82,6 +86,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          build-args: |
+            COTUND_VERSION=${{ steps.version.outputs.version }}
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
