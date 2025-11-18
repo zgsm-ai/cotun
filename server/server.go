@@ -192,8 +192,32 @@ func (s *Server) StartContext(ctx context.Context, host, port string) error {
 	if s.config.ControlPort != "" {
 		go s.startControlServer(ctx)
 	}
-
+	go s.RunFreeHangingTimer(ctx)
 	return s.httpServer.GoServe(ctx, l, h)
+}
+
+/**
+ * RunFreeHangingTimer 定期执行FreeHangingPorts函数
+ * @param {context.Context} ctx - 上下文参数，用于控制定时器的生命周期
+ * 该函数每5分钟执行一次FreeHangingPorts，如果上下文通道被关闭，则退出。
+ */
+func (s *Server) RunFreeHangingTimer(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// 上下文通道被关闭，退出定时器
+			return
+		case <-ticker.C:
+			// 每5分钟执行一次FreeHangingPorts
+			frees := s.allocator.FreeHangingPorts()
+			if len(frees) > 0 {
+				s.Infof("Free hanging ports: %v", frees)
+			}
+		}
+	}
 }
 
 // startControlServer 启动控制面服务器

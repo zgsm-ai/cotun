@@ -48,23 +48,46 @@ func (pa *PortAllocator) AllocatePort(clientId, userId, appName string, clientPo
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
 
+	now := time.Now().Local()
 	key := clientId + "-" + userId + "-" + appName
 	if alloc, exists := pa.names[key]; exists {
 		alloc.ClientPort = clientPort
 		alloc.Status = Allocated
+		alloc.AllocTime = &now
+		alloc.StartTime = nil
 		return *alloc, nil
 	}
-
+	//先分配空槽
+	for port := pa.minPort; port <= pa.maxPort; port++ {
+		_, exists := pa.ports[port]
+		if !exists {
+			alloc := &PortAllocation{
+				ClientId:    clientId,
+				UserId:      userId,
+				AppName:     appName,
+				ClientPort:  clientPort,
+				MappingPort: port,
+				AllocTime:   &now,
+				StartTime:   nil,
+				Status:      Allocated,
+			}
+			pa.names[key] = alloc
+			pa.ports[port] = alloc
+			return *alloc, nil
+		}
+	}
+	// 再分配回收再利用的旧槽
 	for port := pa.minPort; port <= pa.maxPort; port++ {
 		alloc, exists := pa.ports[port]
-		if !exists || alloc.Status == Freed {
+		if exists && alloc.Status == Freed {
 			alloc = &PortAllocation{
 				ClientId:    clientId,
 				UserId:      userId,
 				AppName:     appName,
 				ClientPort:  clientPort,
 				MappingPort: port,
-				StartTime:   time.Now().Local(),
+				AllocTime:   &now,
+				StartTime:   nil,
 				Status:      Allocated,
 			}
 			pa.names[key] = alloc
@@ -78,6 +101,7 @@ func (pa *PortAllocator) AllocatePort(clientId, userId, appName string, clientPo
 
 func (pa *PortAllocator) applyNew(clientId, userId, appName string, clientPort, mappingPort int) (*PortAllocation, error) {
 	//	先找该客户端的分配记录
+	now := time.Now().Local()
 	key := clientId + "-" + userId + "-" + appName
 	if alloc, exists := pa.names[key]; exists {
 		if clientPort != alloc.ClientPort {
@@ -87,6 +111,7 @@ func (pa *PortAllocator) applyNew(clientId, userId, appName string, clientPort, 
 			return nil, fmt.Errorf("mapping port conflict: %d - %d", mappingPort, alloc.MappingPort)
 		}
 		alloc.Status = Connected
+		alloc.StartTime = &now
 		return alloc, nil
 	}
 	//	如果没找到，说明之前没申请过，可能是因为cotund重启，导致客户端使用原端口重新连接
@@ -101,7 +126,8 @@ func (pa *PortAllocator) applyNew(clientId, userId, appName string, clientPort, 
 		AppName:     appName,
 		ClientPort:  clientPort,
 		MappingPort: mappingPort,
-		StartTime:   time.Now().Local(),
+		AllocTime:   &now,
+		StartTime:   &now,
 		Status:      Connected,
 	}
 	pa.names[key] = alloc
@@ -120,16 +146,18 @@ func (pa *PortAllocator) applyOld(clientPort, mappingPort int) (*PortAllocation,
 	if alloc.Status != Allocated {
 		return nil, fmt.Errorf("port [%d] already used: %+v", alloc.MappingPort, alloc)
 	}
+	now := time.Now().Local()
+	alloc.StartTime = &now
 	alloc.Status = Connected
 	return alloc, nil
 }
 
 /**
- *	应用已经分配的端口
+ *	隧道连接成功，应用已经分配的端口
  *	旧版本的cotun客户端，只有两个有效参数clientPort, mappingPort
  *	新版本的cotun客户端，会在http请求头中携带X-Client-Id, X-User-Id, X-App-Name
  */
-func (pa *PortAllocator) ApplyPort(c *PortAllocation, clientPort, mappingPort int) (*PortAllocation, error) {
+func (pa *PortAllocator) OnConnected(c *PortAllocation, clientPort, mappingPort int) (*PortAllocation, error) {
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
 
@@ -140,11 +168,24 @@ func (pa *PortAllocator) ApplyPort(c *PortAllocation, clientPort, mappingPort in
 }
 
 /**
- * ReleasePort frees allocated port
+ *	隧道连接断开，端口仍然给该客户端保留10min
+ */
+func (pa *PortAllocator) OnDisconnected(alloc *PortAllocation) {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	now := time.Now().Local()
+	alloc.Status = Allocated
+	alloc.AllocTime = &now
+	alloc.StartTime = nil
+}
+
+/**
+ * FreePort frees allocated port
  * @param {string} clientId - Client identifier
  * @param {string} appName - Application name (empty releases all client ports)
  */
-func (pa *PortAllocator) ReleasePort(clientId, userId, appName string) []PortAllocation {
+func (pa *PortAllocator) FreePort(clientId, userId, appName string) []PortAllocation {
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
 
@@ -212,6 +253,26 @@ func (pa *PortAllocator) QueryPorts(clientId, userId, appName string) []PortAllo
 			continue
 		}
 		ports = append(ports, *alloc)
+	}
+	return ports
+}
+
+func (pa *PortAllocator) FreeHangingPorts() []PortAllocation {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	ports := []PortAllocation{}
+	now := time.Now()
+	for _, alloc := range pa.names {
+		if alloc.Status == Allocated && now.Sub(*alloc.AllocTime) > 10*time.Minute {
+			alloc.Status = Freed
+			ports = append(ports, *alloc)
+		}
+	}
+	for _, a := range ports {
+		key := a.ClientId + "-" + a.UserId + "-" + a.AppName
+		delete(pa.names, key)
+		delete(pa.ports, a.MappingPort)
 	}
 	return ports
 }

@@ -18,8 +18,9 @@ type PortAllocation struct {
 	ClientVersion string     `json:"clientVersion"`       //客户端cotun版本
 	ClientPort    int        `json:"clientPort"`          //应用端口
 	MappingPort   int        `json:"mappingPort"`         //映射端口
-	StartTime     time.Time  `json:"startTime,omitempty"` //分配时间
 	Status        PortStatus `json:"status"`              //状态
+	AllocTime     *time.Time `json:"allocTime,omitempty"` //端口分配时间
+	StartTime     *time.Time `json:"startTime,omitempty"` //隧道建立时间
 }
 
 // PortAllocationRequest 端口分配请求

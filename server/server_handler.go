@@ -316,7 +316,7 @@ func (s *Server) handleRemote(w http.ResponseWriter, req *http.Request, l *cio.L
 		return alloc
 	}
 
-	alloc, err := s.allocator.ApplyPort(alloc, clientPort, mappingPort)
+	alloc, err := s.allocator.OnConnected(alloc, clientPort, mappingPort)
 	if err != nil {
 		l.Infof("Client apply error: %v", err)
 		return nil
@@ -397,7 +397,7 @@ func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 		rError(w, http.StatusBadRequest, "Missing parameters")
 		return
 	}
-	ports := s.allocator.ReleasePort(clientID, userId, appName)
+	ports := s.allocator.FreePort(clientID, userId, appName)
 	if len(ports) == 0 {
 		s.Infof("Client free error: Port not found, clientId=%s,userId=%s,appName=%s", clientID, userId, appName)
 		rError(w, http.StatusNotFound, "Port not found")
