@@ -1,13 +1,16 @@
 FROM golang:1.24.0 AS builder
 WORKDIR /app
-COPY . .
+
+COPY go.mod go.sum ./
 
 RUN go env -w CGO_ENABLED=0 && \
     go env -w GO111MODULE=on && \
     go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
+RUN go mod download && go mod verify
+
+COPY . .
 
 ARG COTUND_VERSION=v1.2.10
-RUN go mod tidy 
 RUN go build -ldflags="-s -w -X 'github.com/zgsm-ai/cotun/share.BuildVersion=$COTUND_VERSION'" -o cotund server-main/*.go
 RUN chmod 755 cotund
 

@@ -6,8 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -28,8 +26,7 @@ type Config struct {
 	KeyFile     string
 	AuthFile    string
 	Auth        string
-	Proxy       string
-	Socks5      bool
+	Proxy       bool
 	Reverse     bool
 	KeepAlive   time.Duration
 	TLS         TLSConfig
@@ -45,7 +42,6 @@ type Server struct {
 	fingerprint   string
 	httpServer    *cnet.HTTPServer
 	controlServer *cnet.HTTPServer // 控制面服务器
-	reverseProxy  *httputil.ReverseProxy
 	sessCount     int32
 	sessions      *settings.Users
 	sshConfig     *ssh.ServerConfig
@@ -126,24 +122,6 @@ func NewServer(c *Config) (*Server, error) {
 		PasswordCallback: server.authUser,
 	}
 	server.sshConfig.AddHostKey(private)
-	//setup reverse proxy
-	if c.Proxy != "" {
-		u, err := url.Parse(c.Proxy)
-		if err != nil {
-			return nil, err
-		}
-		if u.Host == "" {
-			return nil, server.Errorf("Missing protocol (%s)", u)
-		}
-		server.reverseProxy = httputil.NewSingleHostReverseProxy(u)
-		//always use proxy host
-		server.reverseProxy.Director = func(r *http.Request) {
-			//enforce origin, keep path
-			r.URL.Scheme = u.Scheme
-			r.URL.Host = u.Host
-			r.Host = u.Host
-		}
-	}
 	//print when reverse tunnelling is enabled
 	if c.Reverse {
 		server.Infof("Reverse tunnelling enabled")
@@ -171,9 +149,6 @@ func (s *Server) StartContext(ctx context.Context, host, port string) error {
 	s.Infof("Fingerprint %s", s.fingerprint)
 	if s.users.Len() > 0 {
 		s.Infof("User authentication enabled")
-	}
-	if s.reverseProxy != nil {
-		s.Infof("Reverse proxy enabled")
 	}
 
 	// 启动主HTTP服务器

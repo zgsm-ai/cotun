@@ -95,12 +95,7 @@ var serverHelp = `
     specify a time with a unit, for example '5s' or '2m'. Defaults
     to '25s' (set to 0s to disable).
 
-    --backend, Specifies another HTTP server to proxy requests to when
-    cotun receives a normal HTTP request. Useful for hiding cotun in
-    plain sight.
-
-    --socks5, Allow clients to access the internal SOCKS5 proxy. See
-    cotun client --help for more information.
+    --proxy, Reverse proxy for client-side services.
 
     --reverse, Allow clients to specify reverse port forwarding remotes
     in addition to normal remotes.
@@ -147,9 +142,7 @@ func main() {
 	flags.StringVar(&config.AuthFile, "authfile", "", "")
 	flags.StringVar(&config.Auth, "auth", "", "")
 	flags.DurationVar(&config.KeepAlive, "keepalive", 25*time.Second, "")
-	flags.StringVar(&config.Proxy, "proxy", "", "")
-	flags.StringVar(&config.Proxy, "backend", "", "")
-	flags.BoolVar(&config.Socks5, "socks5", false, "")
+	flags.BoolVar(&config.Proxy, "proxy", false, "")
 	flags.BoolVar(&config.Reverse, "reverse", false, "")
 	flags.StringVar(&config.TLS.Key, "tls-key", "", "")
 	flags.StringVar(&config.TLS.Cert, "tls-cert", "", "")

@@ -8,7 +8,6 @@ import (
 	"github.com/zgsm-ai/cotun/share/cnet"
 	"github.com/zgsm-ai/cotun/share/cos"
 	"github.com/zgsm-ai/cotun/share/settings"
-	"github.com/zgsm-ai/cotun/share/tunnel"
 )
 
 const (
@@ -25,7 +24,6 @@ type (
 	HTTPServer = cnet.HTTPServer
 	ConnStats  = cnet.ConnCount
 	Logger     = cio.Logger
-	TCPProxy   = tunnel.Proxy
 )
 
 var (
@@ -35,7 +33,6 @@ var (
 	Pipe             = cio.Pipe
 	NewLoggerFlag    = cio.NewLoggerFlag
 	NewLogger        = cio.NewLogger
-	Stdio            = cio.Stdio
 	DecodeConfig     = settings.DecodeConfig
 	DecodeRemote     = settings.DecodeRemote
 	NewUsers         = settings.NewUsers
@@ -47,7 +44,6 @@ var (
 	NewHTTPServer    = cnet.NewHTTPServer
 	GoStats          = cos.GoStats
 	SleepSignal      = cos.SleepSignal
-	NewTCPProxy      = tunnel.NewProxy
 )
 
 // EncodeConfig old version

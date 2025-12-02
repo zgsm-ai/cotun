@@ -23,8 +23,8 @@ func TestAuth(t *testing.T) {
 		},
 		&chclient.Config{
 			Remotes: []string{
-				"0.0.0.0:" + tmpPort1 + ":127.0.0.1:$FILEPORT",
-				"0.0.0.0:" + tmpPort2 + ":localhost:$FILEPORT",
+				"0.0.0.0:" + tmpPort1 + ":127.0.0.1:$FILEPORT/tcp",
+				"0.0.0.0:" + tmpPort2 + ":localhost:$FILEPORT/tcp",
 			},
 			Auth: "foo:bar",
 		})

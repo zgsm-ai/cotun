@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,11 +35,6 @@ func (s *Server) handleClientHandler(w http.ResponseWriter, r *http.Request) {
 		s.Infof("ignored client connection using protocol '%s', expected '%s'",
 			protocol, chshare.ProtocolVersion)
 	}
-	//proxy target was provided
-	if s.reverseProxy != nil {
-		s.reverseProxy.ServeHTTP(w, r)
-		return
-	}
 	//no proxy defined, provide access to health/version checks
 	switch r.URL.Path {
 	case "/health":
@@ -45,6 +42,9 @@ func (s *Server) handleClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/version":
 		w.Write([]byte(chshare.BuildVersion))
+		return
+	case "/ws/proxy":
+		s.handleProxy(w, r)
 		return
 	}
 	//missing :O
@@ -155,7 +155,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 		Logger:    l,
 		Inbound:   s.config.Reverse,
 		Outbound:  true, //server always accepts outbound
-		Socks:     s.config.Socks5,
 		KeepAlive: s.config.KeepAlive,
 	})
 	//bind
@@ -190,15 +189,22 @@ func (s *Server) handleControlPlaneHandler(w http.ResponseWriter, r *http.Reques
 
 	paths := strings.Split(r.URL.Path, "/")
 	if len(paths) < 5 {
-		rError(w, http.StatusNotFound, "API endpoint not found")
+		rError(w, http.StatusNotFound, fmt.Sprintf("API endpoint not found: %v", paths))
 		return
 	}
 	if paths[1] != "tunnel-manager" && paths[1] != "cotun" {
-		rError(w, http.StatusNotFound, "API endpoint not found")
+		rError(w, http.StatusNotFound, fmt.Sprintf("API endpoint not found: %v", paths))
 		return
 	}
-	if paths[2] != "api" || paths[3] != "v1" || paths[4] != "ports" {
-		rError(w, http.StatusNotFound, "API endpoint not found")
+	if paths[2] != "api" || paths[3] != "v1" {
+		rError(w, http.StatusNotFound, fmt.Sprintf("API endpoint not found: %v", paths))
+		return
+	}
+	if paths[4] == "proxy" {
+		s.handleProxy(w, r)
+		return
+	} else if paths[4] != "ports" {
+		rError(w, http.StatusNotFound, fmt.Sprintf("API endpoint not found: %v", paths))
 		return
 	}
 	switch {
@@ -209,7 +215,7 @@ func (s *Server) handleControlPlaneHandler(w http.ResponseWriter, r *http.Reques
 	case method == "DELETE":
 		s.handleDeletePort(w, r)
 	default:
-		rError(w, http.StatusNotFound, "API endpoint not found")
+		rError(w, http.StatusNotFound, fmt.Sprintf("API endpoint not found: %v", paths))
 	}
 }
 
@@ -366,8 +372,9 @@ func (s *Server) handleCreatePort(w http.ResponseWriter, r *http.Request) {
 		rError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if req.UserId == "" {
-		req.UserId = s.getUserId(r)
+	uid := s.getUserId(r)
+	if uid != "" {
+		req.UserId = uid
 	}
 
 	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
@@ -389,8 +396,9 @@ func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 	clientID := r.URL.Query().Get("clientId")
 	appName := r.URL.Query().Get("appName")
 	userId := r.URL.Query().Get("userId")
-	if userId == "" {
-		userId = s.getUserId(r)
+	uid := s.getUserId(r)
+	if uid != "" {
+		userId = uid
 	}
 	if clientID == "" || appName == "" || userId == "" {
 		s.Infof("Client free error: URL(%s) missing parameters: clientId=%s,userId=%s,appName=%s", r.URL.Path, clientID, userId, appName)
@@ -406,4 +414,53 @@ func (s *Server) handleDeletePort(w http.ResponseWriter, r *http.Request) {
 	s.Infof("Client freed: clientId=%s,appName=%s,userId=%s, ports=%+v", clientID, appName, userId, ports)
 
 	rJSON(w, http.StatusOK, "Port deleted successfully")
+}
+
+type tunTestReq struct {
+	ClientId string
+	AppName  string
+	UserId   string
+	Url      string
+}
+
+func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
+	if !s.config.Proxy {
+		rJSON(w, http.StatusNotFound, "proxy is disabled")
+		return
+	}
+	var req tunTestReq
+	req.ClientId = r.Header.Get("X-Client-Id")
+	req.AppName = r.Header.Get("X-App-Name")
+	req.UserId = r.Header.Get("X-User-Id")
+	req.Url = r.Header.Get("X-Proxy-Url")
+
+	uid := s.getUserId(r)
+	if uid != "" {
+		req.UserId = uid
+	}
+
+	if req.ClientId == "" || req.AppName == "" || req.UserId == "" {
+		s.Infof("Client proxy error: req: %+v, error: missing required fields", req)
+		rError(w, http.StatusBadRequest, "Missing required fields")
+		return
+	}
+	ret, err := s.allocator.LookupPort(req.ClientId, req.UserId, req.AppName)
+	if err != nil {
+		s.Infof("Client proxy error: req: %+v, error: %v", req, err)
+		rError(w, http.StatusBadRequest, "Port lookup failed")
+		return
+	}
+
+	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", ret.MappingPort, req.Url)
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		s.Infof("Client proxy error: invalid target URL: %v", err)
+		rError(w, http.StatusBadRequest, "Invalid target URL")
+		return
+	}
+	s.Infof("Client proxy: req: %+v, mapping port: %+v", req, ret.MappingPort)
+	r.URL = u
+	r.Host = u.Host
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	proxy.ServeHTTP(w, r)
 }

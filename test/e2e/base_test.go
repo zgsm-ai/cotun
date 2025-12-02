@@ -13,7 +13,7 @@ func TestBase(t *testing.T) {
 	teardown := simpleSetup(t,
 		&chserver.Config{},
 		&chclient.Config{
-			Remotes: []string{tmpPort + ":$FILEPORT"},
+			Remotes: []string{"0.0.0.0:" + tmpPort + ":$FILEPORT/tcp"},
 		})
 	defer teardown()
 	//test remote
@@ -34,7 +34,7 @@ func TestReverse(t *testing.T) {
 			Reverse: true,
 		},
 		&chclient.Config{
-			Remotes: []string{"R:" + tmpPort + ":$FILEPORT"},
+			Remotes: []string{"R:0.0.0.0:" + tmpPort + ":$FILEPORT/tcp"},
 		})
 	defer teardown()
 	//test remote (this goes through the server and out the client)

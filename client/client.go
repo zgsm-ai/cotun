@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	chshare "github.com/zgsm-ai/cotun/share"
 	"github.com/zgsm-ai/cotun/share/ccrypto"
 	"github.com/zgsm-ai/cotun/share/cio"
@@ -25,7 +23,6 @@ import (
 	"github.com/zgsm-ai/cotun/share/tunnel"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/net/proxy"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -37,7 +34,6 @@ type Config struct {
 	MaxRetryCount    int
 	MaxRetryInterval time.Duration
 	Server           string
-	Proxy            string
 	Remotes          []string
 	Headers          http.Header
 	TLS              TLSConfig
@@ -61,7 +57,6 @@ type Client struct {
 	computed  settings.Config
 	sshConfig *ssh.ClientConfig
 	tlsConfig *tls.Config
-	proxyURL  *url.URL
 	server    string
 	connCount cnet.ConnCount
 	stop      func()
@@ -93,8 +88,6 @@ func NewClient(c *Config) (*Client, error) {
 		}
 	}
 	hasReverse := false
-	hasSocks := false
-	hasStdio := false
 	client := &Client{
 		Logger: cio.NewLogger("client"),
 		config: c,
@@ -145,30 +138,14 @@ func NewClient(c *Config) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Failed to decode remote '%s': %s", s, err)
 		}
-		if r.Socks {
-			hasSocks = true
-		}
 		if r.Reverse {
 			hasReverse = true
 		}
-		if r.Stdio {
-			if hasStdio {
-				return nil, errors.New("Only one stdio is allowed")
-			}
-			hasStdio = true
-		}
 		//confirm non-reverse tunnel is available
-		if !r.Reverse && !r.Stdio && !r.CanListen() {
+		if !r.Reverse && !r.CanListen() {
 			return nil, fmt.Errorf("Client cannot listen on %s", r.String())
 		}
 		client.computed.Remotes = append(client.computed.Remotes, r)
-	}
-	//outbound proxy
-	if p := c.Proxy; p != "" {
-		client.proxyURL, err = url.Parse(p)
-		if err != nil {
-			return nil, fmt.Errorf("Invalid proxy URL (%s)", err)
-		}
 	}
 	//ssh auth and config
 	user, pass := settings.ParseAuth(c.Auth)
@@ -184,7 +161,6 @@ func NewClient(c *Config) (*Client, error) {
 		Logger:    client.Logger,
 		Inbound:   true, //client always accepts inbound
 		Outbound:  hasReverse,
-		Socks:     hasReverse && hasSocks,
 		KeepAlive: client.config.KeepAlive,
 	})
 	return client, nil
@@ -242,11 +218,7 @@ func (c *Client) Start(ctx context.Context) error {
 	c.stop = cancel
 	eg, ctx := errgroup.WithContext(ctx)
 	c.eg = eg
-	via := ""
-	if c.proxyURL != nil {
-		via = " via " + c.proxyURL.String()
-	}
-	c.Infof("Connecting to %s%s\n", c.server, via)
+	c.Infof("Connecting to %s\n", c.server)
 	//connect to cotun server
 	eg.Go(func() error {
 		return c.connectionLoop(ctx)
@@ -259,37 +231,6 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 		return c.tunnel.BindRemotes(ctx, clientInbound)
 	})
-	return nil
-}
-
-func (c *Client) setProxy(u *url.URL, d *websocket.Dialer) error {
-	// CONNECT proxy
-	if !strings.HasPrefix(u.Scheme, "socks") {
-		d.Proxy = func(*http.Request) (*url.URL, error) {
-			return u, nil
-		}
-		return nil
-	}
-	// SOCKS5 proxy
-	if u.Scheme != "socks" && u.Scheme != "socks5h" {
-		return fmt.Errorf(
-			"unsupported socks proxy type: %s:// (only socks5h:// or socks:// is supported)",
-			u.Scheme,
-		)
-	}
-	var auth *proxy.Auth
-	if u.User != nil {
-		pass, _ := u.User.Password()
-		auth = &proxy.Auth{
-			User:     u.User.Username(),
-			Password: pass,
-		}
-	}
-	socksDialer, err := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
-	if err != nil {
-		return err
-	}
-	d.NetDial = socksDialer.Dial
 	return nil
 }
 

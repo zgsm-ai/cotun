@@ -2,19 +2,27 @@
 
 [![GoDoc](https://godoc.org/github.com/zgsm-ai/cotun?status.svg)](https://godoc.org/github.com/zgsm-ai/cotun) [![CI](https://github.com/zgsm-ai/cotun/workflows/CI/badge.svg)](https://github.com/zgsm-ai/cotun/actions?workflow=CI)
 
-Cotun is a fast TCP/UDP tunnel, transported over HTTP, secured via SSH. Single executable including both client and server. Written in Go (golang). Cotun is mainly useful for passing through firewalls, though it can also be used to provide a secure endpoint into your network.
+Cotun is a fast TCP tunnel, transported over HTTP, secured via SSH. Single executable including both client and server. Written in Go (golang). Cotun is mainly useful for passing through firewalls, though it can also be used to provide a secure endpoint into your network.
 
 ![overview](https://docs.google.com/drawings/d/1p53VWxzGNfy8rjr-mW8pvisJmhkoLl82vAgctO_6f1w/pub?w=960&h=720)
 
 ## Table of Contents
 
-- [Features](#features)
-- [Install](#install)
-- [Demo](#demo)
-- [Usage](#usage)
-- [Contributing](#contributing)
-- [Changelog](#changelog)
-- [License](#license)
+- [Cotun](#cotun)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Install](#install)
+    - [Binaries](#binaries)
+    - [Docker](#docker)
+    - [Fedora](#fedora)
+    - [Source](#source)
+  - [Demo](#demo)
+  - [Usage](#usage)
+    - [Security](#security)
+    - [Authentication](#authentication)
+  - [Contributing](#contributing)
+  - [Changelog](#changelog)
+  - [License](#license)
 
 ## Features
 
@@ -24,12 +32,9 @@ Cotun is a fast TCP/UDP tunnel, transported over HTTP, secured via SSH. Single e
 - [Authenticated connections](#authentication); authenticated client connections with a users config file, authenticated server connections with fingerprint matching.
 - Client auto-reconnects with [exponential backoff](https://github.com/jpillora/backoff)
 - Clients can create multiple tunnel endpoints over one TCP connection
-- Clients can optionally pass through SOCKS or HTTP CONNECT proxies
+- Clients can optionally pass through HTTP CONNECT proxies
 - Reverse port forwarding (Connections go through the server and out the client)
 - Server optionally doubles as a [reverse proxy](http://golang.org/pkg/net/http/httputil/#NewSingleHostReverseProxy)
-- Server optionally allows [SOCKS5](https://en.wikipedia.org/wiki/SOCKS) connections (See [guide below](#socks5-guide))
-- Clients optionally allow [SOCKS5](https://en.wikipedia.org/wiki/SOCKS) connections from a reversed port forward
-- Client connections over stdio which supports `ssh -o ProxyCommand` providing SSH over HTTP
 
 ## Install
 
@@ -163,8 +168,6 @@ $ cotun server --help
     cotun receives a normal HTTP request. Useful for hiding cotun in
     plain sight.
 
-    --socks5, Allow clients to access the internal SOCKS5 proxy. See
-    cotun client --help for more information.
 
     --reverse, Allow clients to specify reverse port forwarding remotes
     in addition to normal remotes.
@@ -244,34 +247,13 @@ $ cotun client --help
       example.com:3000
       3000:google.com:80
       192.168.0.5:3000:google.com:80
-      socks
-      5000:socks
-      R:2222:localhost:22
-      R:socks
-      R:5000:socks
-      stdio:example.com:22
-      1.1.1.1:53/udp
 
-    When the cotun server has --socks5 enabled, remotes can
-    specify "socks" in place of remote-host and remote-port.
-    The default local host and port for a "socks" remote is
-    127.0.0.1:1080. Connections to this remote will terminate
-    at the server's internal SOCKS5 proxy.
 
     When the cotun server has --reverse enabled, remotes can
     be prefixed with R to denote that they are reversed. That
     is, the server will listen and accept connections, and they
     will be proxied through the client which specified the remote.
-    Reverse remotes specifying "R:socks" will listen on the server's
-    default socks port (1080) and terminate the connection at the
-    client's internal SOCKS5 proxy.
 
-    When stdio is used as local-host, the tunnel will connect standard
-    input/output of this program with the remote. This is useful when 
-    combined with ssh ProxyCommand. You can use
-      ssh -o ProxyCommand='cotun client cotunserver stdio:%h:%p' \
-          user@example.com
-    to connect to an SSH server through the tunnel.
 
   Options:
 
@@ -299,11 +281,10 @@ $ cotun client --help
     --max-retry-interval, Maximum wait time before retrying after a
     disconnection. Defaults to 5 minutes.
 
-    --proxy, An optional HTTP CONNECT or SOCKS5 proxy which will be
+    --proxy, An optional HTTP CONNECT proxy which will be
     used to reach the cotun server. Authentication can be specified
     inside the URL.
     For example, http://admin:password@my-server.com:8081
-            or: socks://admin:password@my-server.com:1080
 
     --header, Set a custom header in the form "HeaderName: HeaderContent".
     Can be used multiple times. (e.g --header "Foo: Bar" --header "Hello: World")
@@ -363,45 +344,6 @@ Using the `--authfile` option, the server may optionally provide a `user.json` c
 
 Internally, this is done using the _Password_ authentication method provided by SSH. Learn more about `crypto/ssh` here http://blog.gopheracademy.com/go-and-ssh/.
 
-### SOCKS5 Guide with Docker
-
-1. Print a new private key to the terminal
-
-    ```sh
-    cotun server --keygen -
-    # or save it to disk --keygen /path/to/mykey
-    ```
-
-1. Start your cotun server
-
-    ```sh
-    zgsm-ai/cotun server --keyfile '<ck-base64 string or file path>' -p 9312 --socks5
-    ```
-
-1. Connect your cotun client (using server's fingerprint)
-
-    ```sh
-    cotun client --fingerprint '<see server output>' <server-address>:9312 socks
-    ```
-
-1. Point your SOCKS5 clients (e.g. OS/Browser) to:
-
-    ```
-    <client-address>:1080
-    ```
-
-1. Now you have an encrypted, authenticated SOCKS5 connection over HTTP
-
-
-#### Caveats
-
-Since WebSockets support is required:
-
-- IaaS providers all will support WebSockets (unless an unsupporting HTTP proxy has been forced in front of you, in which case I'd argue that you've been downgraded to PaaS)
-- PaaS providers vary in their support for WebSockets
-  - Heroku has full support
-  - Openshift has full support though connections are only accepted on ports 8443 and 8080
-  - Google App Engine has **no** support (Track this on [their repo](https://code.google.com/p/googleappengine/issues/detail?id=2535))
 
 ## Contributing
 
@@ -415,12 +357,9 @@ Since WebSockets support is required:
 
 - `1.0` - Initial release
 - `1.1` - Replaced simple symmetric encryption for ECDSA SSH
-- `1.2` - Added SOCKS5 (server) and HTTP CONNECT (client) support
+- `1.2` - Added HTTP CONNECT support
 - `1.3` - Added reverse tunnelling support
 - `1.4` - Added arbitrary HTTP header support
-- `1.5` - Added reverse SOCKS support (by @aus)
-- `1.6` - Added client stdio support (by @BoleynSu)
-- `1.7` - Added UDP support
 - `1.8` - Move to a `scratch`Docker image
 - `1.9` - Bump to Go 1.21. Switch from `--key` seed to P256 key strings with `--key{gen,file}` (by @cmenginnz)
 - `1.10` - Bump to Go 1.22. Add `.rpm` `.deb` and `.akp` to releases. Fix bad version comparison.

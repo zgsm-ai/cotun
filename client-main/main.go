@@ -101,34 +101,13 @@ var clientHelp = `
       example.com:3000
       3000:google.com:80
       192.168.0.5:3000:google.com:80
-      socks
-      5000:socks
       R:2222:localhost:22
-      R:socks
-      R:5000:socks
-      stdio:example.com:22
-      1.1.1.1:53/udp
-
-    When the cotun server has --socks5 enabled, remotes can
-    specify "socks" in place of remote-host and remote-port.
-    The default local host and port for a "socks" remote is
-    127.0.0.1:1080. Connections to this remote will terminate
-    at the server's internal SOCKS5 proxy.
+      1.1.1.1:53
 
     When the cotun server has --reverse enabled, remotes can
     be prefixed with R to denote that they are reversed. That
     is, the server will listen and accept connections, and they
     will be proxied through the client which specified the remote.
-    Reverse remotes specifying "R:socks" will listen on the server's
-    default socks port (1080) and terminate the connection at the
-    client's internal SOCKS5 proxy.
-
-    When stdio is used as local-host, the tunnel will connect standard
-    input/output of this program with the remote. This is useful when
-    combined with ssh ProxyCommand. You can use
-      ssh -o ProxyCommand='cotun client cotunserver stdio:%h:%p' \
-          user@example.com
-    to connect to an SSH server through the tunnel.
 
   Options:
 
@@ -155,12 +134,6 @@ var clientHelp = `
 
     --max-retry-interval, Maximum wait time before retrying after a
     disconnection. Defaults to 5 minutes.
-
-    --proxy, An optional HTTP CONNECT or SOCKS5 proxy which will be
-    used to reach the cotun server. Authentication can be specified
-    inside the URL.
-    For example, http://admin:password@my-server.com:8081
-            or: socks://admin:password@my-server.com:1080
 
     --header, Set a custom header in the form "HeaderName: HeaderContent".
     Can be used multiple times. (e.g --header "Foo: Bar" --header "Hello: World")
@@ -279,7 +252,6 @@ func main() {
 	flag.DurationVar(&config.KeepAlive, "keepalive", 25*time.Second, "")
 	flag.IntVar(&config.MaxRetryCount, "max-retry-count", -1, "")
 	flag.DurationVar(&config.MaxRetryInterval, "max-retry-interval", 0, "")
-	flag.StringVar(&config.Proxy, "proxy", "", "")
 	flag.StringVar(&config.TLS.CA, "tls-ca", "", "")
 	flag.BoolVar(&config.TLS.SkipVerify, "tls-skip-verify", false, "")
 	flag.StringVar(&config.TLS.Cert, "tls-cert", "", "")
