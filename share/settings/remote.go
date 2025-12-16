@@ -173,7 +173,7 @@ func (r Remote) UserAddr() string {
 func (r Remote) CanListen() bool {
 	//valid protocols
 	switch r.LocalProto {
-	case "tcp":
+	case "", "tcp":
 		conn, err := net.Listen("tcp", r.Local())
 		if err == nil {
 			conn.Close()

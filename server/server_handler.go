@@ -133,18 +133,21 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 			addr := r.UserAddr()
 			if !user.HasAccess(addr) {
 				failed(s.Errorf("access to '%s' denied", addr))
+				s.allocator.OnDisconnected(alloc)
 				return
 			}
 		}
 		//confirm reverse tunnels are allowed
 		if r.Reverse && !s.config.Reverse {
-			l.Debugf("Denied reverse port forwarding request, please enable --reverse")
+			// l.Debugf("Denied reverse port forwarding request, please enable --reverse")
 			failed(s.Errorf("Reverse port forwaring not enabled on server"))
+			s.allocator.OnDisconnected(alloc)
 			return
 		}
 		//confirm reverse tunnel is available
 		if r.Reverse && !r.CanListen() {
 			failed(s.Errorf("Server cannot listen on %s", r.String()))
+			s.allocator.OnDisconnected(alloc)
 			return
 		}
 	}
@@ -178,7 +181,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, req *http.Request) {
 	} else {
 		l.Infof("Closed connection: %+v", alloc)
 	}
-	alloc.Status = Allocated
+	s.allocator.OnDisconnected(alloc)
 }
 
 // handleControlPlaneHandler 处理控制面API请求
